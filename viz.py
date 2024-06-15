@@ -10,7 +10,7 @@ import logging
 import os
 from collections import OrderedDict
 from typing import Any, Dict, List, Set
-# from memory_profiler import profile
+import tqdm
 import torch
 
 import detectron2.utils.comm as comm
@@ -36,7 +36,12 @@ import pycocotools.mask as mask_util
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.utils.comm import all_gather, is_main_process, synchronize
 import json
-
+from detectron2.evaluation import (
+    DatasetEvaluator,
+    inference_on_dataset,
+    print_csv_format,
+    verify_results,
+)
 # from detectron2.evaluation import SemSegGzeroEvaluator
 # from mask_former.evaluation.sem_seg_evaluation_gzero import SemSegGzeroEvaluator
 
@@ -153,9 +158,11 @@ class Trainer(DefaultTrainer):
         # Semantic segmentation dataset mapper
         if cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_semantic":
             mapper = MaskFormerSemanticDatasetMapper(cfg, True)
+            # training goes to this one
         # Panoptic segmentation dataset mapper
         elif cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_panoptic":
             mapper = MaskFormerPanopticDatasetMapper(cfg, True)
+
         # DETR-style dataset mapper for COCO panoptic segmentation
         elif cfg.INPUT.DATASET_MAPPER_NAME == "detr_panoptic":
             mapper = DETRPanopticDatasetMapper(cfg, True)
@@ -272,6 +279,119 @@ class Trainer(DefaultTrainer):
         res = cls.test(cfg, model, evaluators)
         res = OrderedDict({k + "_TTA": v for k, v in res.items()})
         return res
+    
+    @classmethod
+    def TestAndViz(cls, cfg, model, evaluators=None):
+        """
+        Evaluate the given model. The given model is expected to already contain
+        weights to evaluate.
+
+        Args:
+            cfg (CfgNode):
+            model (nn.Module):
+            evaluators (list[DatasetEvaluator] or None): if None, will call
+                :meth:`build_evaluator`. Otherwise, must have the same length as
+                ``cfg.DATASETS.TEST``.
+
+        Returns:
+            dict: a dict of result metrics
+        """
+        logger = logging.getLogger(__name__)
+        if isinstance(evaluators, DatasetEvaluator):
+            evaluators = [evaluators]
+        if evaluators is not None:
+            assert len(cfg.DATASETS.TEST) == len(evaluators), "{} != {}".format(
+                len(cfg.DATASETS.TEST), len(evaluators)
+            )
+
+        results = OrderedDict()
+        for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
+            data_loader = cls.build_test_loader(cfg, dataset_name)
+            # When evaluators are passed in as arguments,
+            # implicitly assume that evaluators can be created before data_loader.
+            if evaluators is not None:
+                evaluator = evaluators[idx]
+            else:
+                try:
+                    evaluator = cls.build_evaluator(cfg, dataset_name)
+                except NotImplementedError:
+                    logger.warn(
+                        "No evaluator found. Use `DefaultTrainer.test(evaluators=)`, "
+                        "or implement its `build_evaluator` method."
+                    )
+                    results[dataset_name] = {}
+                    continue
+            #### viz starts here ###
+
+            logger = logging.getLogger(__name__)
+            logger.info("Start inference on {} batches".format(len(data_loader)))
+
+            total = len(data_loader)
+
+
+            from OVRSSS_Visualizer import save_visual
+            for idx, inputs in tqdm.tqdm(enumerate(data_loader)):
+                model.eval()
+                outputs = model(inputs)
+                img = np.array(inputs[0]['image'].detach().cpu())
+
+                gt = np.array(inputs[0]['sem_seg'].detach().cpu())
+                model_output = outputs[0]['sem_seg']
+                gt_size = gt.shape
+                import torch.nn as nn
+
+                UP_Layer = nn.Upsample(size = [gt_size[0],gt_size[1]], mode='bilinear', align_corners=None)
+
+        
+                out_tensor = UP_Layer(model_output.unsqueeze(0))
+                out_map = np.array(out_tensor.squeeze(0).detach().cpu())
+
+                out_map = np.argmax(out_map,axis=0)
+                
+                # print(inputs[0]['file_name'])
+                img_id = inputs[0]['file_name'].split('/')[-1]
+                img_id = img_id.split('.')[-2]
+                dir = cfg.OUTPUT_DIR
+                dir = os.path.join(dir,'viz')
+                if not os.path.exists(dir):
+                    os.mkdir(dir)
+                # dir = '/home/zpp2/ycy/CAT-Seg/Results_Viz_Debug/viz/'
+                save_path = os.path.join(dir,img_id) + '.png'
+
+                # print(save_path)
+
+                # def save_visual(img,out_map,gt,save_path):
+               
+                save_visual(img,out_map,gt,save_path ,cfg.DATASETS.TEST )
+                # exit()
+                # print(outputs['loss_sem_seg'])
+                # print('1111111111')
+                # print(len(outputs))
+                # print(inputs[0].keys())
+                # print(inputs[0]['file_name'])
+                # print(inputs[0]['width'])
+                # print(inputs[0]['height'])
+                # print(inputs[0]['image'].shape)
+                # print(inputs[0]['sem_seg'].shape)
+                # print('11111111111111')
+                # print(outputs[0]['sem_seg'].shape)
+                
+            # exit()
+            #### viz ends here ###
+            results_i = inference_on_dataset(model, data_loader, evaluator)
+            results[dataset_name] = results_i
+            if comm.is_main_process():
+                assert isinstance(
+                    results_i, dict
+                ), "Evaluator must return a dict on the main process. Got {} instead.".format(
+                    results_i
+                )
+                logger.info("Evaluation results for {} in csv format:".format(dataset_name))
+                print_csv_format(results_i)
+
+        if len(results) == 1:
+            results = list(results.values())[0]
+        return results
 
 
 def setup(args):
@@ -299,7 +419,11 @@ def main(args):
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
-        res = Trainer.test(cfg, model)
+        # if args.viz:
+        if True: 
+            res = Trainer.TestAndViz(cfg, model)
+        else:
+            res = Trainer.test(cfg, model)
         if cfg.TEST.AUG.ENABLED:
             res.update(Trainer.test_with_TTA(cfg, model))
         if comm.is_main_process():
@@ -313,6 +437,8 @@ def main(args):
 
 if __name__ == "__main__":
     args = default_argument_parser().parse_args()
+    # Namespace(config_file='configs/vitb_r101_384.yaml', dist_url='auto', eval_only=False, 
+    # machine_rank=0, num_gpus=1, num_machines=1, opts=['OUTPUT_DIR', 'output/'], resume=True)
     print("Command Line Args:", args)
     launch(
         main,

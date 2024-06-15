@@ -14,10 +14,66 @@ from detectron2.structures import ImageList
 from detectron2.utils.memory import _ignore_torch_cuda_oom
 
 from einops import rearrange
+# import vision_transformer as vits
+from .vision_transformer import vit_base
+# from .mambaIR import VSSBlock
+from memory_profiler import profile
+import os
+
+def BuildDINO():
+    model = vit_base(patch_size=8, num_classes=0)
+    for p in model.parameters():
+        p.requires_grad = False
+        # 冻结
+
+    # model.to(self.device)
+    # state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + url)
+    # model.load_state_dict(state_dict, strict=True)
+    print('definition success')
+    # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
+    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
+
+    if os.path.isfile(Pretrianed_Weights):
+        state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
+        # state_dict = torch.load(Pretrianed_Weights)
+        checkpoint_key = "teacher"
+        if checkpoint_key is not None and checkpoint_key in state_dict:
+            print(f"Take key {checkpoint_key} in provided checkpoint dict")
+            state_dict = state_dict[checkpoint_key]
+        # remove `module.` prefix
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        # remove `backbone.` prefix induced by multicrop wrapper
+        state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+        msg = model.load_state_dict(state_dict, strict=False)
+        print('Pretrained weights found at {} and loaded with msg: {}'.format(Pretrianed_Weights, msg))
+        return model
+@staticmethod
+def compute_weighted_pool(maskclip_feats: torch.Tensor, corrs: torch.Tensor):
+    """
+    Weighted pooling method.
+    :param maskclip_feats: torch.tensor - raw clip features
+    :param corrs: torch.tensor - correlations as weights for pooling mechanism
+    :return: torch.tensor - refined clip features
+    """
+    B = maskclip_feats.shape[0]
+    h_m, w_m = maskclip_feats.shape[-2:]
+    h_w, w_w = corrs.shape[-2:]
+
+    if (h_m != h_w) or (w_m != w_w):
+        print('shape not exactly same')
+        assert False
+    maskclip_feats_ref = torch.einsum("bnij, bcij -> bcn", corrs, maskclip_feats)  # B C HW
+    norm_factor = corrs.flatten(-2, -1).sum(dim=-1)[:, None]  # B 1 HW
+    maskclip_feats_ref = maskclip_feats_ref / (norm_factor + 1e-6)
+
+    # RESHAPE back to 2d
+    maskclip_feats_ref = maskclip_feats_ref.reshape(B, -1, h_m, w_m)
+    return maskclip_feats_ref
 
 @META_ARCH_REGISTRY.register()
-class CATSeg(nn.Module):
+class ImplicitFusionCATSegVer02(nn.Module):
     @configurable
+    
     def __init__(
         self,
         *,
@@ -34,12 +90,45 @@ class CATSeg(nn.Module):
         clip_finetune: str,
         backbone_multiplier: float,
         clip_pretrained: str,
+        dino: nn.Module,
     ):
         """
         Args:
             sem_seg_head: a module that predicts semantic segmentation from backbone features
         """
         super().__init__()
+        # implicit_guidance_model_name = "dino"
+        #################### added by ycy ####################
+        # if implicit_guidance_model_name == "dino":
+        #     model = vit_base(patch_size=8, num_classes=0)
+        #     for p in model.parameters():
+        #         p.requires_grad = False
+        #         # 冻结
+        
+        #     # model.to(self.device)
+        #     print('definition success')
+        #     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
+        #     Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
+
+        #     if os.path.isfile(Pretrianed_Weights):
+        #         state_dict = torch.load(Pretrianed_Weights, map_location=self.device)
+        #         # state_dict = torch.load(Pretrianed_Weights)
+        #         checkpoint_key = "teacher"
+        #         if checkpoint_key is not None and checkpoint_key in state_dict:
+        #             print(f"Take key {checkpoint_key} in provided checkpoint dict")
+        #             state_dict = state_dict[checkpoint_key]
+        #         # remove `module.` prefix
+        #         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        #         # remove `backbone.` prefix induced by multicrop wrapper
+        #         state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+        #         msg = model.load_state_dict(state_dict, strict=False)
+        #         print('Pretrained weights found at {} and loaded with msg: {}'.format(Pretrianed_Weights, msg))
+        #         # del state_dict
+        #     self.dino_model = model
+        #     print('Loading Success')
+        # exit()
+        self.dino_model = dino
+        #################### added by ycy ####################
         self.backbone = backbone
         self.sem_seg_head = sem_seg_head
         if size_divisibility < 0:
@@ -53,6 +142,7 @@ class CATSeg(nn.Module):
         
         self.train_class_json = train_class_json
         self.test_class_json = test_class_json
+        # self.vss_block = VSSBlock()
 
         self.clip_finetune = clip_finetune
         for name, params in self.sem_seg_head.predictor.clip_model.named_parameters():
@@ -80,7 +170,11 @@ class CATSeg(nn.Module):
         self.proj_dim = 768 if clip_pretrained == "ViT-B/16" else 1024
         self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
         self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
-
+        self.clip_feat_upsample = nn.ConvTranspose2d(512, 768, kernel_size=2, stride=2)
+        # self.clip_dino_fusion_layer = nn.Conv2d(in_channels=1536, out_channels=512, kernel_size=1, stride=1, padding=0)
+        self.fused_proj_layer = nn.Conv2d(in_channels=768, out_channels=512, kernel_size=1, stride=1, padding=0)
+        # not used in Ver02
+        self.clip_dino_fusion_downsample = nn.MaxPool2d(2, stride=2)
         self.layer_indexes = [3, 7] if clip_pretrained == "ViT-B/16" else [7, 15] 
         self.layers = []
         for l in self.layer_indexes:
@@ -91,7 +185,7 @@ class CATSeg(nn.Module):
     def from_config(cls, cfg):
         backbone = None
         sem_seg_head = build_sem_seg_head(cfg, None)
-        
+        dino = BuildDINO()
         return {
             "backbone": backbone,
             "sem_seg_head": sem_seg_head,
@@ -106,13 +200,15 @@ class CATSeg(nn.Module):
             "clip_finetune": cfg.MODEL.SEM_SEG_HEAD.CLIP_FINETUNE,
             "backbone_multiplier": cfg.SOLVER.BACKBONE_MULTIPLIER,
             "clip_pretrained": cfg.MODEL.SEM_SEG_HEAD.CLIP_PRETRAINED,
+            "dino": dino
         }
 
     @property
     def device(self):
         return self.pixel_mean.device
-    
+    @profile(precision=4,stream=open('./log.txt','w+',encoding="utf-8"))
     def forward(self, batched_inputs):
+
         """
         Args:
             batched_inputs: a list, batched outputs of :class:`DatasetMapper`.
@@ -135,16 +231,71 @@ class CATSeg(nn.Module):
         """
         
         images = [x["image"].to(self.device) for x in batched_inputs]
+        # images_shape: 384*384
         if not self.training and self.sliding_window:
             return self.inference_sliding_window(batched_inputs)
 
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
-
+       
         self.layers = []
 
         clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
+
         clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
+        ######################## added by ycy ########################
+        clip_cls_token = clip_features[:,0,:].unsqueeze(1) # B, 1, 512
+        clip_patch_tokens = clip_features[:,1:,:]
+        clip_patch_last_unfold = rearrange(clip_patch_tokens,"B (H W) C -> B C H W", H=24 )
+        clip_patch_last_upsample = self.clip_feat_upsample(clip_patch_last_unfold) # use
+        # print(clip_features.shape) [4, 577, 512]
+        # dino_feat = self.dino_model.get_intermediate_layers(clip_images_resized, n=12) # actually only 12 layers, but use a large num to avoid ambiguity
+        dino_attn_qkv = self.dino_model.get_last_qkv(clip_images_resized)
+        
+        
+
+        q, k, v = dino_attn_qkv[0].transpose(1, 2).float(), dino_attn_qkv[1].transpose(1, 2).float(), dino_attn_qkv[2].transpose(1, 2).float()
+        
+        num_extra_tokens = 1
+        dino_feat = k[:, num_extra_tokens:, :, :].flatten(-2, -1).permute(0, 2, 1)
+        
+
+        dino_feat = dino_feat / dino_feat.norm(dim=1, keepdim=True)
+        B = clip_features.shape[0]
+        hf, wf = 48, 48
+        corrs = torch.matmul(dino_feat.permute(0, 2, 1), dino_feat).reshape(B, hf, wf, hf * wf)
+        gamma = 0.2
+        if gamma is not None:
+            corrs[corrs < gamma] = 0.0
+        # corrs = rearrange(corrs, "B H W C -> B C H W")
+        corrs = corrs.permute(0, 3, 1, 2) # [4, 2304, 48, 48]
+
+        fused_feat = torch.einsum("bnij, bcij -> bcn", corrs, clip_patch_last_upsample)
+        norm_factor = corrs.flatten(-2, -1).sum(dim=-1)[:, None]  # B 1 HW
+        fused_feat = fused_feat / (norm_factor + 1e-6)
+        # fused_feat = rearrange(fused_feat,"B C (H W) -> B C H W", H=48)
+        fused_feat = fused_feat.reshape(B,-1,hf,wf)
+ 
+ 
+        ########### Ver01 Method ###########
+        # dino_patch_feat_last_unfold = rearrange(dino_feat[-1][:,1:,:],"B (H W) C -> B C H W", H=48)
+        # # print(clip_patch_last_unfold.shape) torch.Size([4, 512, 24, 24])
+        # # print(clip_path_last_upsample.shape) torch.Size([4, 768, 48, 48])
+        # dino_cat_clip_on_C = torch.cat([dino_patch_feat_last_unfold,clip_patch_last_upsample],dim=1)
+        # fused_feat = self.clip_dino_fusion_layer(dino_cat_clip_on_C)
+        ########### Ver01 Method ###########
+        
+        
+        fused_feat = self.fused_proj_layer(fused_feat) # go down on channel
+        down_fused_feat = self.clip_dino_fusion_downsample(fused_feat)
+        flattened_fused_feat = rearrange(down_fused_feat,"B C H W ->  B (H W) C", H=24 )
+        
+
+        # fallened_fused_feat_with_cls_token = 
+        flattened_fused_feat = torch.cat([clip_cls_token,flattened_fused_feat],dim=1)
+
+        # print(dino_patch_feat_last_unfold.shape) torch.Size([4, 768, 48, 48])
+        ######################## added by ycy ########################
 
         image_features = clip_features[:, 1:, :]
 
@@ -152,11 +303,26 @@ class CATSeg(nn.Module):
         res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
         res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
         res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
+        # print(res3.shape, res4.shape,res5.shape)
+        # torch.Size([4, 512, 24, 24]) torch.Size([4, 768, 24, 24]) torch.Size([4, 768, 24, 24])
+       
         res4 = self.upsample1(res4)
         res5 = self.upsample2(res5)
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
+        # print('clip_features', clip_features.shape)
+        # for i in features.keys(): print(i, features[i].shape)
+        # clip_features torch.Size([4, 577, 512])
+        # res5 torch.Size([4, 128, 96, 96])
+        # res4 torch.Size([4, 256, 48, 48])
+        # res3 torch.Size([4, 512, 24, 24])
 
-        outputs = self.sem_seg_head(clip_features, features)
+        
+        
+        
+        # outputs = self.sem_seg_head(clip_features, features)
+        outputs = self.sem_seg_head(flattened_fused_feat,features)
+        
+        
         if self.training:
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)

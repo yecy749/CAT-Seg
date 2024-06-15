@@ -17,3 +17,7 @@ from .data.dataset_mappers.mask_former_semantic_dataset_mapper import (
 # models
 from .cat_seg_model import CATSeg
 from .test_time_augmentation import SemanticSegmentorWithTTA
+from .implicit_fusion_Ver02 import ImplicitFusionCATSegVer02
+from .vision_transformer import vit_base
+# from .vision_transformer import * 
+# from .vision_transformer import vits

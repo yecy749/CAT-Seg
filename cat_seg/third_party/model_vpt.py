@@ -4,7 +4,8 @@ from typing import Tuple, Union
 import torch
 import torch.nn.functional as F
 from torch import nn
-
+# from visualizer import get_local
+# get_local.activate()
 
 
 class Bottleneck(nn.Module):
@@ -175,6 +176,7 @@ class Attention(nn.MultiheadAttention):
         self.k_proj_weight = nn.Parameter(k)
         self.v_proj_weight = nn.Parameter(v)
         self.in_proj_weight = None
+        
     
     def forward(self, *args, **kwargs):
         return super().forward(*args, **kwargs)
@@ -185,6 +187,7 @@ class ResidualAttentionBlock(nn.Module):
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
         super().__init__()
 
+        # self.attn = Attention(d_model, n_head)
         self.attn = Attention(d_model, n_head)
         self.ln_1 = LayerNorm(d_model)
         self.mlp = nn.Sequential(OrderedDict([
@@ -197,11 +200,17 @@ class ResidualAttentionBlock(nn.Module):
         self.mask_pre_mlp = True
 
     def attention(self, x: torch.Tensor):
+        
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
-        return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
-
+        
+        return self.attn(x, x, x, need_weights=True, attn_mask=self.attn_mask)#[0]
+    # @get_local('attention_map')
     def forward(self, x: torch.Tensor, prompt=None):
-        x = x + self.attention(self.ln_1(x))
+        # print('attention get here!')
+        attention, attention_map = self.attention(self.ln_1(x))
+        x = x + attention
+        #  modified by ycy
+        #  originally: x = x + self.attention(self.ln_1(x))[0]
         x = x + self.mlp(self.ln_2(x))
         if prompt is not None:
             x = torch.cat((x[0:1, :, :], x[prompt + 1: :, :]), dim=0)
