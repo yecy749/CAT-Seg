@@ -30,7 +30,7 @@ def BuildDINO():
     # model.load_state_dict(state_dict, strict=True)
     print('definition success')
     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
-    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
+    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFT_p=8/checkpoint.pth'
 
     if os.path.isfile(Pretrianed_Weights):
         state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
@@ -70,7 +70,7 @@ def compute_weighted_pool(maskclip_feats: torch.Tensor, corrs: torch.Tensor):
     return maskclip_feats_ref
 
 @META_ARCH_REGISTRY.register()
-class ImplicitFusionCATSegVer02(nn.Module):
+class ImplicitFusionCATSegVer05(nn.Module):
     @configurable
     
     def __init__(
@@ -96,36 +96,7 @@ class ImplicitFusionCATSegVer02(nn.Module):
             sem_seg_head: a module that predicts semantic segmentation from backbone features
         """
         super().__init__()
-        # implicit_guidance_model_name = "dino"
-        #################### added by ycy ####################
-        # if implicit_guidance_model_name == "dino":
-        #     model = vit_base(patch_size=8, num_classes=0)
-        #     for p in model.parameters():
-        #         p.requires_grad = False
-        #         # 冻结
-        
-        #     # model.to(self.device)
-        #     print('definition success')
-        #     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
-        #     Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
 
-        #     if os.path.isfile(Pretrianed_Weights):
-        #         state_dict = torch.load(Pretrianed_Weights, map_location=self.device)
-        #         # state_dict = torch.load(Pretrianed_Weights)
-        #         checkpoint_key = "teacher"
-        #         if checkpoint_key is not None and checkpoint_key in state_dict:
-        #             print(f"Take key {checkpoint_key} in provided checkpoint dict")
-        #             state_dict = state_dict[checkpoint_key]
-        #         # remove `module.` prefix
-        #         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-        #         # remove `backbone.` prefix induced by multicrop wrapper
-        #         state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-        #         msg = model.load_state_dict(state_dict, strict=False)
-        #         print('Pretrained weights found at {} and loaded with msg: {}'.format(Pretrianed_Weights, msg))
-        #         # del state_dict
-        #     self.dino_model = model
-        #     print('Loading Success')
-        # exit()
         self.dino_model = dino
         #################### added by ycy ####################
         self.backbone = backbone
@@ -167,9 +138,14 @@ class ImplicitFusionCATSegVer02(nn.Module):
         self.clip_resolution = (384, 384) if clip_pretrained == "ViT-B/16" else (336, 336)
 
         self.proj_dim = 768 if clip_pretrained == "ViT-B/16" else 1024
-        self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
-        self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
-        self.clip_feat_upsample = nn.ConvTranspose2d(512, 768, kernel_size=2, stride=2)
+        # self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
+        # self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
+        
+        self.res4_proj = nn.Conv2d(self.proj_dim, out_channels=256, kernel_size=1, stride=1, padding=0)
+        self.res5_proj = nn.ConvTranspose2d(self.proj_dim, out_channels=128, kernel_size=2, stride=2)
+        
+        self.clip_feat_upsample1 = nn.ConvTranspose2d(512, 768, kernel_size=2, stride=2)
+        self.clip_feat_upsample2 = nn.ConvTranspose2d(768, 768, kernel_size=2, stride=2)
         # self.clip_dino_fusion_layer = nn.Conv2d(in_channels=1536, out_channels=512, kernel_size=1, stride=1, padding=0)
         self.fused_proj_layer = nn.Conv2d(in_channels=768, out_channels=512, kernel_size=1, stride=1, padding=0)
         # not used in Ver02
@@ -205,6 +181,32 @@ class ImplicitFusionCATSegVer02(nn.Module):
     @property
     def device(self):
         return self.pixel_mean.device
+    
+
+    def AffinityFusion(self,dino_attn_qkv, clip_feat):
+        # CLIP_Feat是BCHW的特征
+        if(clip_feat.shape[1]==768):
+            clip_feat_up = self.clip_feat_upsample2(clip_feat)
+        elif(clip_feat.shape[1]==512):
+            clip_feat_up = self.clip_feat_upsample1(clip_feat)
+        q, k, v = dino_attn_qkv[0].transpose(1, 2).float(), dino_attn_qkv[1].transpose(1, 2).float(), dino_attn_qkv[2].transpose(1, 2).float()
+        num_extra_tokens = 1
+        dino_feat = k[:, num_extra_tokens:, :, :].flatten(-2, -1).permute(0, 2, 1)
+        dino_feat = dino_feat / dino_feat.norm(dim=1, keepdim=True)
+        B = clip_feat_up.shape[0]
+        hf, wf = 48, 48
+        corrs = torch.matmul(dino_feat.permute(0, 2, 1), dino_feat).reshape(B, hf, wf, hf * wf)
+        gamma = 0.2
+        if gamma is not None:
+            corrs[corrs < gamma] = 0.0
+        corrs = corrs.permute(0, 3, 1, 2) # [4, 2304, 48, 48]
+        fused_feat = torch.einsum("bnij, bcij -> bcn", corrs, clip_feat_up)
+        norm_factor = corrs.flatten(-2, -1).sum(dim=-1)[:, None]  # B 1 HW
+        fused_feat = fused_feat / (norm_factor + 1e-6)
+        # fused_feat = rearrange(fused_feat,"B C (H W) -> B C H W", H=48)
+        fused_feat = fused_feat.reshape(B,-1,hf,wf)
+        return fused_feat
+        
     def forward(self, batched_inputs):
 
         """
@@ -245,34 +247,21 @@ class ImplicitFusionCATSegVer02(nn.Module):
         clip_cls_token = clip_features[:,0,:].unsqueeze(1) # B, 1, 512
         clip_patch_tokens = clip_features[:,1:,:]
         clip_patch_last_unfold = rearrange(clip_patch_tokens,"B (H W) C -> B C H W", H=24 )
-        clip_patch_last_upsample = self.clip_feat_upsample(clip_patch_last_unfold) # use
+        clip_patch_last_upsample = self.clip_feat_upsample1(clip_patch_last_unfold) # use
         # print(clip_features.shape) [4, 577, 512]
         # dino_feat = self.dino_model.get_intermediate_layers(clip_images_resized, n=12) # actually only 12 layers, but use a large num to avoid ambiguity
-        dino_attn_qkv = self.dino_model.get_last_qkv(clip_images_resized)
-        
-        
+        dino_attn_qkv = self.dino_model.get_intermediate_qkv(clip_images_resized,n=100)
+        # dino_last_attn_qkv = dino_attn_qkv[-1]
+        Fused_feat = []
+        for indCLIP,indDino in enumerate(self.layer_indexes):
+            CLip_layer_feat = rearrange(self.layers[indCLIP][1:, :, :], "(H W) B C -> B C H W", H=24)
+            Fused_feat.append(self.AffinityFusion(dino_attn_qkv[indDino],CLip_layer_feat))
 
-        q, k, v = dino_attn_qkv[0].transpose(1, 2).float(), dino_attn_qkv[1].transpose(1, 2).float(), dino_attn_qkv[2].transpose(1, 2).float()
-        
-        num_extra_tokens = 1
-        dino_feat = k[:, num_extra_tokens:, :, :].flatten(-2, -1).permute(0, 2, 1)
-        
 
-        dino_feat = dino_feat / dino_feat.norm(dim=1, keepdim=True)
-        B = clip_features.shape[0]
-        hf, wf = 48, 48
-        corrs = torch.matmul(dino_feat.permute(0, 2, 1), dino_feat).reshape(B, hf, wf, hf * wf)
-        gamma = 0.2
-        if gamma is not None:
-            corrs[corrs < gamma] = 0.0
-        # corrs = rearrange(corrs, "B H W C -> B C H W")
-        corrs = corrs.permute(0, 3, 1, 2) # [4, 2304, 48, 48]
-
-        fused_feat = torch.einsum("bnij, bcij -> bcn", corrs, clip_patch_last_upsample)
-        norm_factor = corrs.flatten(-2, -1).sum(dim=-1)[:, None]  # B 1 HW
-        fused_feat = fused_feat / (norm_factor + 1e-6)
-        # fused_feat = rearrange(fused_feat,"B C (H W) -> B C H W", H=48)
-        fused_feat = fused_feat.reshape(B,-1,hf,wf)
+        
+            
+            
+     
  
  
         ########### Ver01 Method ###########
@@ -284,13 +273,15 @@ class ImplicitFusionCATSegVer02(nn.Module):
         ########### Ver01 Method ###########
         
         
-        fused_feat = self.fused_proj_layer(fused_feat) # go down on channel
-        down_fused_feat = self.clip_dino_fusion_downsample(fused_feat)
-        flattened_fused_feat = rearrange(down_fused_feat,"B C H W ->  B (H W) C", H=24 )
+        fused_feat_last = self.fused_proj_layer(Fused_feat[-1]) # go down on channel
+
+        down_fused_feat_last = self.clip_dino_fusion_downsample(fused_feat_last)
+        res3 = down_fused_feat_last
+        flattened_fused_feat_last = rearrange(down_fused_feat_last,"B C H W ->  B (H W) C", H=24 )
         
 
         # fallened_fused_feat_with_cls_token = 
-        flattened_fused_feat = torch.cat([clip_cls_token,flattened_fused_feat],dim=1)
+        flattened_fused_feat_last = torch.cat([clip_cls_token,flattened_fused_feat_last],dim=1)
 
         # print(dino_patch_feat_last_unfold.shape) torch.Size([4, 768, 48, 48])
         ######################## added by ycy ########################
@@ -298,14 +289,16 @@ class ImplicitFusionCATSegVer02(nn.Module):
         image_features = clip_features[:, 1:, :]
 
         # CLIP ViT features for guidance
-        res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
-        res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
+        # res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
+        # res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
         res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
         # print(res3.shape, res4.shape,res5.shape)
         # torch.Size([4, 512, 24, 24]) torch.Size([4, 768, 24, 24]) torch.Size([4, 768, 24, 24])
        
-        res4 = self.upsample1(res4)
-        res5 = self.upsample2(res5)
+        # res4 = self.upsample1(res4)
+        res4 = self.res4_proj(Fused_feat[0])
+        res5 = self.res5_proj(Fused_feat[1])
+
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
         # print('clip_features', clip_features.shape)
         # for i in features.keys(): print(i, features[i].shape)
@@ -318,7 +311,7 @@ class ImplicitFusionCATSegVer02(nn.Module):
         
         
         # outputs = self.sem_seg_head(clip_features, features)
-        outputs = self.sem_seg_head(flattened_fused_feat,features)
+        outputs = self.sem_seg_head(flattened_fused_feat_last,features)
         
         
         if self.training:

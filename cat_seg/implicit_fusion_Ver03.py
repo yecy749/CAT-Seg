@@ -30,7 +30,7 @@ def BuildDINO():
     # model.load_state_dict(state_dict, strict=True)
     print('definition success')
     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
-    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
+    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/VanillaCKPT/dino_vitbase8_pretrain.pth'
 
     if os.path.isfile(Pretrianed_Weights):
         state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
@@ -70,7 +70,7 @@ def compute_weighted_pool(maskclip_feats: torch.Tensor, corrs: torch.Tensor):
     return maskclip_feats_ref
 
 @META_ARCH_REGISTRY.register()
-class ImplicitFusionCATSegVer02(nn.Module):
+class ImplicitFusionCATSegVer03(nn.Module):
     @configurable
     
     def __init__(

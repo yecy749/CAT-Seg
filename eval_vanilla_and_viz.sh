@@ -30,19 +30,6 @@ opts=${@}
 # modelweights=R101-Ignore255/model_final.pth
 # modelweights=CKPT/vanilla/model_base.pth
 
-# Potsdam
-python train_net.py --config $config \
- --num-gpus $gpus \
- --dist-url "auto" \
- --eval-only \
- OUTPUT_DIR $output/eval/Potsdam \
- MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON "datasets/potsdam.json" \
- DATASETS.TEST \(\"potsdam_all\"\,\) \
- TEST.SLIDING_WINDOW "True" \
- MODEL.SEM_SEG_HEAD.POOLING_SIZES "[1,1]" \
- MODEL.WEIGHTS $output/model_final.pth \
- $opts
-
 # FloodNet
 
 python train_net.py --config $config \
@@ -83,7 +70,18 @@ python train_net.py --config $config \
  MODEL.WEIGHTS $output/model_final.pth \
  $opts
 
-
+# Potsdam
+python train_net.py --config $config \
+ --num-gpus $gpus \
+ --dist-url "auto" \
+ --eval-only \
+ OUTPUT_DIR $output/eval/Potsdam \
+ MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON "datasets/potsdam.json" \
+ DATASETS.TEST \(\"potsdam_all\"\,\) \
+ TEST.SLIDING_WINDOW "True" \
+ MODEL.SEM_SEG_HEAD.POOLING_SIZES "[1,1]" \
+ MODEL.WEIGHTS $output/model_final.pth \
+ $opts
 
 
 

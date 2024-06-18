@@ -145,7 +145,7 @@ class Block(nn.Module):
     def forward(self, x, return_attention=False, return_qkv=False):
         y, attn, qkv = self.attn(self.norm1(x))
         if return_qkv:
-            return qkv
+            return x, qkv
         if return_attention:
             return attn
         x = x + self.drop_path(y)
@@ -268,7 +268,18 @@ class VisionTransformer(nn.Module):
                 x = blk(x)
             else:
                 # return attention of the last block
-                return blk(x, return_attention=False, return_qkv=True)
+                return blk(x, return_attention=False, return_qkv=True)[1]
+            
+    def get_intermediate_qkv(self,x,n=1):
+         # we return the output qkv from the `n` last blocks
+        x = self.prepare_tokens(x)
+        output=[]
+        for i, blk in enumerate(self.blocks):
+            x, qkv = blk(x, return_attention=False, return_qkv=True)
+            if len(self.blocks) - i <= n:
+                output.append(qkv)
+        return output
+    
     def get_intermediate_layers(self, x, n=1):
         x = self.prepare_tokens(x)
         # we return the output tokens from the `n` last blocks

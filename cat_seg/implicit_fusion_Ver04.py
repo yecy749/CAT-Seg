@@ -30,7 +30,7 @@ def BuildDINO():
     # model.load_state_dict(state_dict, strict=True)
     print('definition success')
     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
-    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
+    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFT_p=8/checkpoint.pth'
 
     if os.path.isfile(Pretrianed_Weights):
         state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
@@ -70,7 +70,7 @@ def compute_weighted_pool(maskclip_feats: torch.Tensor, corrs: torch.Tensor):
     return maskclip_feats_ref
 
 @META_ARCH_REGISTRY.register()
-class ImplicitFusionCATSegVer02(nn.Module):
+class ImplicitFusionCATSegVer04(nn.Module):
     @configurable
     
     def __init__(
@@ -227,20 +227,47 @@ class ImplicitFusionCATSegVer02(nn.Module):
                     The prediction has shape KxHxW that represents the logits of
                     each class for each pixel.
         """
+        if self.training or not self.sliding_window:
+            images = [x["image"].to(self.device) for x in batched_inputs]
+            # images_shape: 384*384
+            clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
+            clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
         
-        images = [x["image"].to(self.device) for x in batched_inputs]
-        # images_shape: 384*384
+            self.layers = []
+
+            clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
+
+            clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
         if not self.training and self.sliding_window:
+            kernel=384
+            overlap=0.333
+            out_res=[640, 640]
+            images = [x["image"].to(self.device, dtype=torch.float32) for x in batched_inputs]
+            stride = int(kernel * (1 - overlap))
+            unfold = nn.Unfold(kernel_size=kernel, stride=stride)
+            fold = nn.Fold(out_res, kernel_size=kernel, stride=stride)
+
+            image = F.interpolate(images[0].unsqueeze(0), size=out_res, mode='bilinear', align_corners=False).squeeze()
+            image = rearrange(unfold(image), "(C H W) L-> L C H W", C=3, H=kernel)
+            global_image = F.interpolate(images[0].unsqueeze(0), size=(kernel, kernel), mode='bilinear', align_corners=False)
+            image = torch.cat((image, global_image), dim=0)
+
+            images = (image - self.pixel_mean) / self.pixel_std
+            clip_images = (image - self.clip_pixel_mean) / self.clip_pixel_std
+            clip_images = F.interpolate(clip_images, size=self.clip_resolution, mode='bilinear', align_corners=False, )
+            
+            self.layers = []
+            clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images, dense=True)
+            res3 = rearrange(clip_features[:, 1:, :], "B (H W) C -> B C H W", H=24)
+            res4 = self.upsample1(rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24))
+            res5 = self.upsample2(rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24))
+
+            features = {'res5': res5, 'res4': res4, 'res3': res3,}
+            outputs = self.sem_seg_head(clip_features, features)
+
             return self.inference_sliding_window(batched_inputs)
 
-        clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
-        clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
-       
-        self.layers = []
 
-        clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
-
-        clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
         ######################## added by ycy ########################
         clip_cls_token = clip_features[:,0,:].unsqueeze(1) # B, 1, 512
         clip_patch_tokens = clip_features[:,1:,:]
