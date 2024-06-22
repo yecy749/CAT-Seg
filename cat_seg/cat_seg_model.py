@@ -208,7 +208,7 @@ class CATSeg(nn.Module):
 
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
         outputs = self.sem_seg_head(clip_features, features)
-
+        
         outputs = F.interpolate(outputs, size=kernel, mode="bilinear", align_corners=False)
         outputs = outputs.sigmoid()
         

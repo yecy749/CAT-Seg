@@ -152,9 +152,12 @@ class CATSegPredictor(nn.Module):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         text = [text[c] for c in gt_cls] if gt_cls is not None else text
+
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
         
         text = text.repeat(x.shape[0], 1, 1, 1)
+        # text: [B,N,1,512]
+
         out = self.transformer(x, text, vis)
         return out
 
@@ -202,12 +205,14 @@ class CATSegPredictor(nn.Module):
                     texts = clip.tokenize(texts).cuda()
                 tokens.append(texts)
             tokens = torch.stack(tokens, dim=0).squeeze(1)
+
             if prompt is None:
                 self.tokens = tokens
         elif self.tokens is not None and prompt is None:
             tokens = self.tokens
-
+        # tokens: [N,77]
         class_embeddings = clip_model.encode_text(tokens, prompt)
+
         class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
         
         

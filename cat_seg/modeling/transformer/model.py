@@ -684,9 +684,10 @@ class Aggregator(nn.Module):
         """
         Arguments:
             img_feats: (B, C, H, W)
-            text_feats: (B, T, P, C)
+            text_feats: (B, T, P, C) T是类别的个数
             apperance_guidance: tuple of (B, C, H, W)
         """
+
         classes = None
 
         corr = self.correlation(img_feats, text_feats)
