@@ -1,8 +1,9 @@
-export CUDA_VISIBLE_DEVICES=1
-RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver07a
-META_ARCH=ImplicitFusionCATSegVer07
-SEG_HEAD=FusionHeadVer07
-CLIP_FT=Freeze
+# export CUDA_VISIBLE_DEVICES=1
+export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
+RESULTS=./new-cat-seg-results/Ver08b
+META_ARCH=ImplicitFusionCATSegVer08
+SEG_HEAD=FusionHeadVer08
+CLIP_FT=attention
 
 sh train_Landdiscover.sh configs/vitb_384.yaml 1 $RESULTS \
 MODEL.META_ARCHITECTURE $META_ARCH \

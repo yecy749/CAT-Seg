@@ -1,4 +1,5 @@
 export CUDA_VISIBLE_DEVICES=1
+export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
 RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver07a
 META_ARCH=ImplicitFusionCATSegVer07
 SEG_HEAD=FusionHeadVer08
