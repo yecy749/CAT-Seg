@@ -27,6 +27,7 @@ from .implicit_fusion_Ver05 import ImplicitFusionCATSegVer05
 from .implicit_fusion_Ver05a import ImplicitFusionCATSegVer05a
 from .implicit_fusion_Ver06 import ImplicitFusionCATSegVer06
 from .implicit_fusion_Ver07 import ImplicitFusionCATSegVer07
+from .implicit_fusion_Ver08 import ImplicitFusionCATSegVer08
 from .vision_transformer import vit_base
 # from .vision_transformer import * 
 # from .vision_transformer import vits

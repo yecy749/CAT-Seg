@@ -1,7 +1,7 @@
-export CUDA_VISIBLE_DEVICES=0
-RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver07Debug
+export CUDA_VISIBLE_DEVICES=1
+RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver07a
 META_ARCH=ImplicitFusionCATSegVer07
-SEG_HEAD=FusionHead
+SEG_HEAD=FusionHeadVer08
 
 
 sh train_Landdiscover.sh configs/vitb_384.yaml 1 $RESULTS \
