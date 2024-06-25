@@ -32,8 +32,8 @@ def BuildDINO():
     print('definition success')
     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
     # Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
-    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/VanillaCKPT/dino_vitbase8_pretrain.pth'
-
+    # Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/VanillaCKPT/dino_vitbase8_pretrain.pth'
+    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFT_p=8/checkpoint.pth'
     if os.path.isfile(Pretrianed_Weights):
         state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
         # state_dict = torch.load(Pretrianed_Weights)
