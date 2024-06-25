@@ -1,18 +1,19 @@
-# export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
-RESULTS=./new-cat-seg-results/Ver08b
-META_ARCH=ImplicitFusionCATSegVer08
-SEG_HEAD=FusionHeadVer08
+RESULTS=./new-cat-seg-results/Ver09c
+META_ARCH=ImplicitFusionCATSegVer09c
+SEG_HEAD=FusionHeadVer09c
 CLIP_FT=attention
 
 sh train_Landdiscover.sh configs/vitb_384.yaml 1 $RESULTS \
 MODEL.META_ARCHITECTURE $META_ARCH \
 MODEL.SEM_SEG_HEAD.NAME $SEG_HEAD \
 MODEL.SEM_SEG_HEAD.CLIP_FINETUNE $CLIP_FT \
-TEST.EVAL_PERIOD 0 
-
+TEST.EVAL_PERIOD 0 \
+DATALOADER.NUM_WORKERS 8
 
 # From Ver 0.7, we modify the seg_head
+
 sh eval_vanilla.sh configs/vitb_384.yaml 1 $RESULTS/EvalResults \
 MODEL.META_ARCHITECTURE $META_ARCH \
 MODEL.SEM_SEG_HEAD.NAME $SEG_HEAD \
