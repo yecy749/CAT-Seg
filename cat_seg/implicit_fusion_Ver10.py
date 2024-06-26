@@ -17,11 +17,7 @@ from einops import rearrange
 # import vision_transformer as vits
 from .vision_transformer import vit_base
 # from .mambaIR import VSSBlock
-<<<<<<< HEAD
-from memory_profiler import profile
-=======
 # from memory_profiler import profile
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
 import os
 
 def BuildDINO():
