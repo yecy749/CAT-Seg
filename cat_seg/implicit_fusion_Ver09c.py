@@ -17,11 +17,7 @@ from einops import rearrange
 # import vision_transformer as vits
 from .vision_transformer import vit_base
 # from .mambaIR import VSSBlock
-<<<<<<< HEAD
-from memory_profiler import profile
-=======
 # from memory_profiler import profile
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
 import os
 
 def BuildDINO():
@@ -37,12 +33,12 @@ def BuildDINO():
     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
     # Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
 <<<<<<< HEAD
-    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/VanillaCKPT/dino_vitbase8_pretrain.pth'
-
-=======
     # Pretrianed_Weights = '/15857864889/yecy/dino/results/vit_b_8_from_pretrained_epoch300/checkpoint.pth'
     Pretrianed_Weights = '/15857864889/yecy/dino_vitbase8_pretrain.pth'
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
+=======
+    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/VanillaCKPT/dino_vitbase8_pretrain.pth'
+
+>>>>>>> TrainonLandDiscover
     if os.path.isfile(Pretrianed_Weights):
         state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
         # state_dict = torch.load(Pretrianed_Weights)
@@ -160,12 +156,9 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         self.proj_dim = 768 if clip_pretrained == "ViT-B/16" else 1024
         self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
         self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
-<<<<<<< HEAD
-=======
         self.dino_decod_proj1 = nn.Conv2d(in_channels = 768, out_channels=256, kernel_size=1, stride=1, padding=0)
         self.dino_decod_proj2 = nn.ConvTranspose2d(in_channels= 768, out_channels=128, kernel_size=2, stride=2)
         
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
         self.dino_down_sample = nn.Conv2d(in_channels=768, out_channels=512, kernel_size=2, stride=2, padding=0)
         # self.clip_feat_upsample = nn.ConvTranspose2d(512, 768, kernel_size=2, stride=2)
         # self.clip_dino_fusion_layer = nn.Conv2d(in_channels=1536, out_channels=512, kernel_size=1, stride=1, padding=0)
@@ -201,11 +194,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
     @property
     def device(self):
         return self.pixel_mean.device
-<<<<<<< HEAD
-    @profile(precision=4,stream=open('./log.txt','w+',encoding="utf-8"))
-=======
     # @profile(precision=4,stream=open('./log.txt','w+',encoding="utf-8"))
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
     def forward(self, batched_inputs):
 
         """
@@ -295,12 +284,9 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         dino_patch_feat_last_unfold = rearrange(dino_feat[-1][:,1:,:],"B (H W) C -> B C H W", H=48)
         dino_feat_down = self.dino_down_sample(dino_patch_feat_last_unfold) # B,512,24,24
         
-<<<<<<< HEAD
-=======
         
         dino_feat_L4 = rearrange(dino_feat[3][:,1:,:],"B (H W) C -> B C H W", H=48)
         dino_feat_L8 = rearrange(dino_feat[7][:,1:,:],"B (H W) C -> B C H W", H=48)
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
         # print(clip_patch_last_unfold.shape) torch.Size([4, 512, 24, 24])
         # print(clip_path_last_upsample.shape) torch.Size([4, 768, 48, 48])
         # dino_cat_clip_on_C = torch.cat([dino_patch_feat_last_unfold,clip_patch_last_upsample],dim=1)
@@ -324,15 +310,11 @@ class ImplicitFusionCATSegVer09c(nn.Module):
        
         res4 = self.upsample1(res4)
         res5 = self.upsample2(res5)
-<<<<<<< HEAD
-        features = {'res5': res5, 'res4': res4, 'res3': res3,}
-=======
         dino_feat_L4_proj = self.dino_decod_proj1(dino_feat_L4)
         dino_feat_L8_proj = self.dino_decod_proj2(dino_feat_L8)
         dino_feat_guidance = [dino_feat_L4_proj,dino_feat_L8_proj]
 
         clip_features_guidance = {'res5': res5, 'res4': res4, 'res3': res3,}
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
         # print('clip_features', clip_features.shape)
         # for i in features.keys(): print(i, features[i].shape)
         # clip_features torch.Size([4, 577, 512])
@@ -345,11 +327,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         
         # outputs = self.sem_seg_head(clip_features, features)
 
-<<<<<<< HEAD
-        outputs = self.sem_seg_head(clip_features,dino_feat_down, features)
-=======
         outputs = self.sem_seg_head(clip_features,dino_feat_down, clip_features_guidance, dino_feat_guidance)
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
         if self.training:
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)

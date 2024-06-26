@@ -1271,6 +1271,9 @@ class FusionAggregatorVer09(nn.Module):
         return logit
 <<<<<<< HEAD
 =======
+<<<<<<< HEAD
+=======
+>>>>>>> TrainonLandDiscover
 class FusionAggregatorVer09d(nn.Module):
     def __init__(self, 
         text_guidance_dim=512,
@@ -1545,7 +1548,10 @@ class FusionAggregatorVer09d(nn.Module):
             out.scatter_(dim=1, index=classes[..., None, None].expand(-1, -1, logit.size(-2), logit.size(-1)), src=logit)
             logit = out
         return logit
+<<<<<<< HEAD
+=======
 >>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
+>>>>>>> TrainonLandDiscover
 
 class FusionAggregatorVer09c(nn.Module):
     def __init__(self, 
@@ -1784,10 +1790,14 @@ class FusionAggregatorVer09c(nn.Module):
             CLIP_projected_decoder_guidance = [proj(g) for proj, g in zip(self.CLIP_decoder_guidance_projection, appearance_guidance[1:])]
         if self.DINO_decoder_guidance_projection is not None:
 <<<<<<< HEAD
+            DINO_projected_decoder_guidance = [proj(g) for proj, g in zip(self.DINO_decoder_guidance_projection, dino_guidance)]
+=======
+<<<<<<< HEAD
             DINO_projected_decoder_guidance = [proj(g) for proj, g in zip(self.DINO_decoder_guidance_projection, appearance_guidance[1:])]
 =======
             DINO_projected_decoder_guidance = [proj(g) for proj, g in zip(self.DINO_decoder_guidance_projection, dino_guidance)]
 >>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
+>>>>>>> TrainonLandDiscover
         if self.text_guidance_projection is not None:
             text_feats = text_feats.mean(dim=-2)
             text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
@@ -1803,9 +1813,13 @@ class FusionAggregatorVer09c(nn.Module):
 
         # logit = self.conv_decoder(clip_corr_embed, projected_decoder_guidance)
 <<<<<<< HEAD
+
+=======
+<<<<<<< HEAD
 =======
 
 >>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
+>>>>>>> TrainonLandDiscover
         logit = self.Fusion_conv_decoer(fused_corr_embed, CLIP_projected_decoder_guidance,DINO_projected_decoder_guidance)
 
         
