@@ -119,8 +119,6 @@ class FusionHeadVer10(nn.Module):
         """
         img_feat = rearrange(features[:, 1:, :], "b (h w) c->b c h w", h=self.feature_resolution[0], w=self.feature_resolution[1])
         return self.predictor(img_feat,dino_feat, guidance_features, prompt, gt_cls)
-<<<<<<< HEAD
-=======
 @SEM_SEG_HEADS_REGISTRY.register()
 class FusionHeadVer09d(nn.Module):
 
@@ -167,7 +165,6 @@ class FusionHeadVer09d(nn.Module):
         """
         img_feat = rearrange(features[:, 1:, :], "b (h w) c->b c h w", h=self.feature_resolution[0], w=self.feature_resolution[1])
         return self.predictor(img_feat,dino_feat, guidance_features,dino_guidance_feat, prompt, gt_cls)
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
     
 @SEM_SEG_HEADS_REGISTRY.register()
 class FusionHeadVer09c(nn.Module):
@@ -207,23 +204,15 @@ class FusionHeadVer09c(nn.Module):
             ),
         }
 
-<<<<<<< HEAD
-    def forward(self, features,dino_feat, guidance_features, prompt=None, gt_cls=None):
-=======
     def forward(self, features,dino_feat, guidance_features, dino_guidance_feat, prompt=None, gt_cls=None):
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
         """
         Arguments:
             img_feats: (B, C, HW)
             guidance_features: (B, C, )
         """
         img_feat = rearrange(features[:, 1:, :], "b (h w) c->b c h w", h=self.feature_resolution[0], w=self.feature_resolution[1])
-<<<<<<< HEAD
-        return self.predictor(img_feat,dino_feat, guidance_features, prompt, gt_cls)
-=======
         return self.predictor(img_feat,dino_feat, guidance_features,dino_guidance_feat, prompt, gt_cls)
     
->>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
 @SEM_SEG_HEADS_REGISTRY.register()
 class FusionHeadVer09b(nn.Module):
 
