@@ -151,7 +151,11 @@ class FusionPredictorVer09c(nn.Module):
 
         return ret
 
+<<<<<<< HEAD
     def forward(self, x,dino_feat, vis_guidance, prompt=None, gt_cls=None):
+=======
+    def forward(self, x,dino_feat, vis_guidance,dino_guidance, prompt=None, gt_cls=None):
+>>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         text = [text[c] for c in gt_cls] if gt_cls is not None else text
@@ -160,7 +164,11 @@ class FusionPredictorVer09c(nn.Module):
         
         text = text.repeat(x.shape[0], 1, 1, 1)
         # text: [B,N,1,512]
+<<<<<<< HEAD
         out = self.transformer(x,dino_feat, text, vis)
+=======
+        out = self.transformer(x,dino_feat, text, vis,dino_guidance)
+>>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
         return out
 
     @torch.no_grad()

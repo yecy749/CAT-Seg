@@ -1,5 +1,5 @@
 #!/bin/sh
-export DETECTRON2_DATASETS='/home/zpp2/ycy/datasets'
+export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
 config=$1
 gpus=$2
 output=$3
@@ -25,7 +25,7 @@ fi
 shift 3
 opts=${@}
 
-python train_net.py --config $config \
+python3 train_net.py --config $config \
  --num-gpus $gpus \
  --dist-url "auto" \
  --resume \

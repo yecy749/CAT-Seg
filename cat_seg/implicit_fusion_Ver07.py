@@ -17,7 +17,7 @@ from einops import rearrange
 # import vision_transformer as vits
 from .vision_transformer import vit_base
 # from .mambaIR import VSSBlock
-from memory_profiler import profile
+# from memory_profiler import profile
 import os
 
 def BuildDINO():
@@ -186,7 +186,7 @@ class ImplicitFusionCATSegVer07(nn.Module):
     @property
     def device(self):
         return self.pixel_mean.device
-    @profile(precision=4,stream=open('./log.txt','w+',encoding="utf-8"))
+    # @profile(precision=4,stream=open('./log.txt','w+',encoding="utf-8"))
     def forward(self, batched_inputs):
 
         """

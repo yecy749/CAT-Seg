@@ -17,7 +17,7 @@ from einops import rearrange
 # import vision_transformer as vits
 from .vision_transformer import vit_base
 # from .mambaIR import VSSBlock
-from memory_profiler import profile
+# from memory_profiler import profile
 import os
 
 def BuildDINO():
@@ -32,8 +32,13 @@ def BuildDINO():
     print('definition success')
     # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
     # Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
+<<<<<<< HEAD
     # Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/VanillaCKPT/dino_vitbase8_pretrain.pth'
     Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFT_p=8/checkpoint.pth'
+=======
+    # Pretrianed_Weights = '/15857864889/yecy/dino/results/vit_b_8_from_pretrained_epoch300/checkpoint.pth'
+    Pretrianed_Weights = '/15857864889/yecy/dino_vitbase8_pretrain.pth'
+>>>>>>> 51eba470d2bedad3cb2cf38dd5bb06a43452443e
     if os.path.isfile(Pretrianed_Weights):
         state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
         # state_dict = torch.load(Pretrianed_Weights)
@@ -186,7 +191,7 @@ class ImplicitFusionCATSegVer08(nn.Module):
     @property
     def device(self):
         return self.pixel_mean.device
-    @profile(precision=4,stream=open('./log.txt','w+',encoding="utf-8"))
+    # @profile(precision=4,stream=open('./log.txt','w+',encoding="utf-8"))
     def forward(self, batched_inputs):
 
         """

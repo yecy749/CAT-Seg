@@ -19,9 +19,10 @@ def _get_landdiscover50k_meta():
     return ret
 
 def register_ade20k_150(root):
-    # root = os.path.join(root, "FAST")
+    root = os.path.join(root, "SAMRS")
+    root = os.path.join(root, "FAST")
     # ValidList = os.path.join(root, "valid.txt")
-    root = '/media/zpp2/Datamy/ycy/RSSG/SAMRS/FAST/'
+    # root = '/media/zpp2/Datamy/ycy/RSSG/SAMRS/FAST/'
     meta = _get_landdiscover50k_meta()
     # for name, image_dirname, sem_seg_dirname in [
     #     ("test", "images/validation", "annotations_detectron2/validation"),
