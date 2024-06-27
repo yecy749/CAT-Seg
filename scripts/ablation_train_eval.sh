@@ -1,15 +1,8 @@
-<<<<<<< HEAD
-export CUDA_VISIBLE_DEVICES=0
-export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
-RESULTS=./new-cat-seg-results/Ver09c
+export CUDA_VISIBLE_DEVICES=1
+export DETECTRON2_DATASETS='/home/zpp2/ycy/datasets'
+RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver0.9c_Sigmoid
 META_ARCH=ImplicitFusionCATSegVer09c
 SEG_HEAD=FusionHeadVer09c
-=======
-export CUDA_VISIBLE_DEVICES=1
-RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver0.9b
-META_ARCH=ImplicitFusionCATSegVer09b
-SEG_HEAD=FusionHeadVer09b
->>>>>>> TrainonLandDiscover
 CLIP_FT=attention
 
 sh train_Landdiscover.sh configs/vitb_384.yaml 1 $RESULTS \

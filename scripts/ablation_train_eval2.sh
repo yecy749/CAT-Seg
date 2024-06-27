@@ -1,6 +1,6 @@
-export CUDA_VISIBLE_DEVICES=1
-export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
-RESULTS=./new-cat-seg-results/Ver09d
+export CUDA_VISIBLE_DEVICES=0
+export DETECTRON2_DATASETS='/home/zpp2/ycy/datasets'
+RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver0.9d_Sigmoid
 META_ARCH=ImplicitFusionCATSegVer09d
 SEG_HEAD=FusionHeadVer09d
 CLIP_FT=attention

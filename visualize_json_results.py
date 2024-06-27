@@ -80,6 +80,8 @@ if __name__ == "__main__":
         def dataset_id_map(ds_id):
             return ds_id
     elif "FloodNet" or "FLAIR" or "FAST" or "potsdam" in args.dataset:
+        # print(111)
+        # exit()
         def dataset_id_map(ds_id):
             return ds_id
     else:   
@@ -90,6 +92,10 @@ if __name__ == "__main__":
     for dic in tqdm.tqdm(dicts):
         img = cv2.imread(dic["file_name"], cv2.IMREAD_COLOR)[:, :, ::-1]
         basename = os.path.basename(dic["file_name"])
+        # print(img)
+        # print(pred_by_image)
+        print(dic["file_name"] )
+        exit()
         if dic["file_name"] in pred_by_image:
             pred = create_instances(
                 pred_by_image[dic["file_name"]],

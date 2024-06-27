@@ -19,10 +19,57 @@ from ..transformer.FusionPredictorVer09 import FusionPredictorVer09
 from ..transformer.FusionPredictorVer09a import FusionPredictorVer09a
 from ..transformer.FusionPredictorVer09b import FusionPredictorVer09b
 from ..transformer.FusionPredictorVer09c import FusionPredictorVer09c
+from ..transformer.FusionPredictorVer09d import FusionPredictorVer09d
 from ..transformer.FusionPredictorVer10 import FusionPredictorVer10
 from ..transformer.FusionPredictorVer11 import FusionPredictorVer11
+from ..transformer.FusionPredictorVer12 import FusionPredictorVer12
 
+@SEM_SEG_HEADS_REGISTRY.register()
+class FusionHeadVer12(nn.Module):
 
+    @configurable
+    def __init__(
+        self,
+        *,
+        num_classes: int,
+        ignore_value: int = -1,
+        # extra parameters
+        feature_resolution: list,
+        transformer_predictor: nn.Module,
+    ):
+        """
+        NOTE: this interface is experimental.
+        Args:
+            num_classes: number of classes to predict
+            ignore_value: category id to be ignored during training.
+            feature_resolution: resolution of the feature map
+            transformer_predictor: the transformer decoder that makes prediction
+        """
+        super().__init__()
+        self.ignore_value = ignore_value
+        self.predictor = transformer_predictor
+        self.num_classes = num_classes
+        self.feature_resolution = feature_resolution
+
+    @classmethod
+    def from_config(cls, cfg, input_shape: Dict[str, ShapeSpec]):
+        return {
+            "ignore_value": cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+            "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
+            "feature_resolution": cfg.MODEL.SEM_SEG_HEAD.FEATURE_RESOLUTION,
+            "transformer_predictor": FusionPredictorVer12(
+                cfg,
+            ),
+        }
+
+    def forward(self, features,dino_feat, guidance_features, dino_guidance_feat, prompt=None, gt_cls=None):
+        """
+        Arguments:
+            img_feats: (B, C, HW)
+            guidance_features: (B, C, )
+        """
+        img_feat = rearrange(features[:, 1:, :], "b (h w) c->b c h w", h=self.feature_resolution[0], w=self.feature_resolution[1])
+        return self.predictor(img_feat,dino_feat, guidance_features,dino_guidance_feat, prompt, gt_cls)
 
 @SEM_SEG_HEADS_REGISTRY.register()
 class FusionHeadVer11(nn.Module):
@@ -152,7 +199,7 @@ class FusionHeadVer09d(nn.Module):
             "ignore_value": cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
             "num_classes": cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
             "feature_resolution": cfg.MODEL.SEM_SEG_HEAD.FEATURE_RESOLUTION,
-            "transformer_predictor": FusionPredictorVer09c(
+            "transformer_predictor": FusionPredictorVer09d(
                 cfg,
             ),
         }

@@ -1,5 +1,5 @@
 #!/bin/sh
-export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
+# export DETECTRON2_DATASETS='/15857864889/yecy/datasets'
 config=$1
 gpus=$2
 output=$3
