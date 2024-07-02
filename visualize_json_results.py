@@ -94,8 +94,7 @@ if __name__ == "__main__":
         basename = os.path.basename(dic["file_name"])
         # print(img)
         # print(pred_by_image)
-        print(dic["file_name"] )
-        exit()
+
         if dic["file_name"] in pred_by_image:
             pred = create_instances(
                 pred_by_image[dic["file_name"]],

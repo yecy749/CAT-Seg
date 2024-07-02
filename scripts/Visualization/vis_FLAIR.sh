@@ -1,6 +1,6 @@
 # EXP-FOLDER=/media/zpp2/PHDD/output/new-cat-seg-results/Ver0.2/
 export DETECTRON2_DATASETS='/home/zpp2/ycy/datasets/'
-METHOD=Ver0.9c
+METHOD=baseline_from_scratch
 JSON=/media/zpp2/PHDD/output/new-cat-seg-results/$METHOD/EvalResults/eval/FLAIR/inference/sem_seg_predictions.json
 # JSON=/media/zpp2/PHDD/output/new-cat-seg-results/Ver0.2/EvalResults/eval/Potsdam/inference/sem_seg_predictions.json
 # JSON=/media/zpp2/PHDD/output/new-cat-seg-results/BaselineResults/eval_results/results_from_scratch/eval/Potsdam/inference/sem_seg_predictions.json

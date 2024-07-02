@@ -1,8 +1,8 @@
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 export DETECTRON2_DATASETS='/home/zpp2/ycy/datasets'
-RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver0.9d_Sigmoid
-META_ARCH=ImplicitFusionCATSegVer09d
-SEG_HEAD=FusionHeadVer09d
+RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver12a
+META_ARCH=ImplicitFusionCATSegVer12a
+SEG_HEAD=FusionHeadVer12a
 CLIP_FT=attention
 
 sh train_Landdiscover.sh configs/vitb_384.yaml 1 $RESULTS \
@@ -18,4 +18,4 @@ DATALOADER.NUM_WORKERS 8
 sh eval_vanilla.sh configs/vitb_384.yaml 1 $RESULTS/EvalResults \
 MODEL.META_ARCHITECTURE $META_ARCH \
 MODEL.SEM_SEG_HEAD.NAME $SEG_HEAD \
-MODEL.WEIGHTS $RESULTS/model_final.pth \
+MODEL.WEIGHTS $RESULTS/model_0079999.pth 

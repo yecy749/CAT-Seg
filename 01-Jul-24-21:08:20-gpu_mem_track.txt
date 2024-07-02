@@ -1,0 +1,5 @@
+GPU Memory Track | 01-Jul-24-21:08:28 | Total Tensor Used Memory:11975.5Mb Total Allocated Memory:13031.4Mb
+
+
+At /home/zpp2/ycy/CAT-SEG-NEW/new-CAT-SEG/cat_seg/implicit_fusion_Ver13.py line 363: forward Total Tensor Used Memory:11975.5Mb Total Allocated Memory:13031.4Mb
+

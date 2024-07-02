@@ -51,7 +51,7 @@ def BuildDINO():
         return model
     
 @META_ARCH_REGISTRY.register()
-class ImplicitFusionCATSegVer09c(nn.Module):
+class ImplicitFusionCATSegVer09e(nn.Module):
     @configurable
     
     

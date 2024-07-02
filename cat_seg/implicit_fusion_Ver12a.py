@@ -19,39 +19,17 @@ from .vision_transformer import vit_base
 # from .mambaIR import VSSBlock
 # from memory_profiler import profile
 import os
-
-def BuildDINO():
-    model = vit_base(patch_size=8, num_classes=0)
-    for p in model.parameters():
+from .segment_anything import build_sam, SamAutomaticMaskGenerator, sam_model_registry, SamPredictor 
+# import segment_anything
+def BuildSAM():
+    sam = sam_model_registry["vit_b"](checkpoint="/media/zpp2/PHDD/sam_vit_b_01ec64.pth").to(device='cuda')
+    for p in sam.parameters():
         p.requires_grad = False
-        # 冻结
-
-    # model.to(self.device)
-    # state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + url)
-    # model.load_state_dict(state_dict, strict=True)
-    print('definition success')
-    # Pretrianed_Weights = '/media/zpp2/Datamy/ycy/dino/pretrained_weights/dino_vitbase8_pretrain_full_checkpoint.pth'
-    # Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFromScratch_p=8/checkpoint.pth'
-    # Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/VanillaCKPT/dino_vitbase8_pretrain.pth'
-    Pretrianed_Weights = '/media/zpp2/PHDD/output/DINO-Results/vitbFT_p=8/checkpoint.pth'
-    if os.path.isfile(Pretrianed_Weights):
-        state_dict = torch.load(Pretrianed_Weights, map_location='cpu')
-        # state_dict = torch.load(Pretrianed_Weights)
-        checkpoint_key = "teacher"
-        if checkpoint_key is not None and checkpoint_key in state_dict:
-            print(f"Take key {checkpoint_key} in provided checkpoint dict")
-            state_dict = state_dict[checkpoint_key]
-        # remove `module.` prefix
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-        # remove `backbone.` prefix induced by multicrop wrapper
-        state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-        msg = model.load_state_dict(state_dict, strict=False)
-        print('Pretrained weights found at {} and loaded with msg: {}'.format(Pretrianed_Weights, msg))
-        model = model.float()
-        return model
+    sam_encoder = sam.image_encoder
+    return sam_encoder
     
 @META_ARCH_REGISTRY.register()
-class ImplicitFusionCATSegVer09c(nn.Module):
+class ImplicitFusionCATSegVer12a(nn.Module):
     @configurable
     
     
@@ -71,7 +49,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         clip_finetune: str,
         backbone_multiplier: float,
         clip_pretrained: str,
-        dino: nn.Module,
+        sam: nn.Module,
     ):
         """
         Args:
@@ -108,7 +86,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         #     self.dino_model = model
         #     print('Loading Success')
         # exit()
-        self.dino_model = dino
+        # self.dino_model = dino
         #################### added by ycy ####################
         self.backbone = backbone
         self.sem_seg_head = sem_seg_head
@@ -124,7 +102,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         self.train_class_json = train_class_json
         self.test_class_json = test_class_json
         # self.vss_block = VSSBlock()
-
+        self.sam_encoder = sam
         self.clip_finetune = clip_finetune
         for name, params in self.sem_seg_head.predictor.clip_model.named_parameters():
             if "transformer" in name:
@@ -147,14 +125,25 @@ class ImplicitFusionCATSegVer09c(nn.Module):
 
         self.sliding_window = sliding_window
         self.clip_resolution = (384, 384) if clip_pretrained == "ViT-B/16" else (336, 336)
-
+        self.sam_resolution = (1024, 1024)
         self.proj_dim = 768 if clip_pretrained == "ViT-B/16" else 1024
         self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
         self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
-        self.dino_decod_proj1 = nn.Conv2d(in_channels = 768, out_channels=256, kernel_size=1, stride=1, padding=0)
-        self.dino_decod_proj2 = nn.ConvTranspose2d(in_channels= 768, out_channels=128, kernel_size=2, stride=2)
+        # self.dino_decod_proj1 = nn.Conv2d(in_channels = 768, out_channels=256, kernel_size=1, stride=1, padding=0)
+        # self.dino_decod_proj2 = nn.ConvTranspose2d(in_channels= 768, out_channels=128, kernel_size=2, stride=2)
         
-        self.dino_down_sample = nn.Conv2d(in_channels=768, out_channels=512, kernel_size=2, stride=2, padding=0)
+        self.sam_decod_proj1 = nn.Conv2d(in_channels = 768, out_channels=256, kernel_size=1, stride=1, padding=0)
+        self.sam_decod_proj2 = nn.ConvTranspose2d(in_channels=768, out_channels=128, kernel_size=2, stride=2)
+        self.sam_last_proj = nn.Conv2d(in_channels = 256, out_channels=512, kernel_size=1, stride=1, padding=0)
+        # self.sam = sam_model_registry["vit_b"](checkpoint="/media/zpp2/PHDD/sam_vit_b_01ec64.pth").to(device='cuda')
+        # for p in self.sam.parameters():
+        #     p.requires_grad = False
+        # self.sam_encoder = self.sam.image_encoder
+        # for p in self.sam_encoder.parameters():
+        #     p.requires_grad = False
+
+        # self.sam_predictor = SamPredictor(sam)
+        # self.dino_down_sample = nn.Conv2d(in_channels=768, out_channels=512, kernel_size=2, stride=2, padding=0)
         # self.clip_feat_upsample = nn.ConvTranspose2d(512, 768, kernel_size=2, stride=2)
         # self.clip_dino_fusion_layer = nn.Conv2d(in_channels=1536, out_channels=512, kernel_size=1, stride=1, padding=0)
         # self.clip_dino_fusion_downsample = nn.MaxPool2d(2, stride=2)
@@ -168,7 +157,8 @@ class ImplicitFusionCATSegVer09c(nn.Module):
     def from_config(cls, cfg):
         backbone = None
         sem_seg_head = build_sem_seg_head(cfg, None)
-        dino = BuildDINO()
+        # dino = BuildDINO()
+        sam_encoder = BuildSAM()
         return {
             "backbone": backbone,
             "sem_seg_head": sem_seg_head,
@@ -183,7 +173,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
             "clip_finetune": cfg.MODEL.SEM_SEG_HEAD.CLIP_FINETUNE,
             "backbone_multiplier": cfg.SOLVER.BACKBONE_MULTIPLIER,
             "clip_pretrained": cfg.MODEL.SEM_SEG_HEAD.CLIP_PRETRAINED,
-            "dino": dino
+            "sam":sam_encoder
         }
 
     @property
@@ -214,6 +204,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         """
         if self.training:
             images = [x["image"].to(self.device) for x in batched_inputs]
+
             # images_shape: 384*384
             clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
             clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
@@ -221,7 +212,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
             self.layers = []
 
             clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
-
+            sam_images_resized = F.interpolate(clip_images.tensor, size=self.sam_resolution, mode='bilinear', align_corners=False, )
             clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
         elif not self.sliding_window:
             with torch.no_grad():
@@ -233,7 +224,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
                 self.layers = []
 
                 clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
-
+                sam_images_resized = F.interpolate(clip_images.tensor, size=self.sam_resolution, mode='bilinear', align_corners=False, )
                 clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
         elif self.sliding_window:
             with torch.no_grad():
@@ -254,6 +245,7 @@ class ImplicitFusionCATSegVer09c(nn.Module):
                 clip_images = (image - self.clip_pixel_mean) / self.clip_pixel_std
                 clip_images = F.interpolate(clip_images, size=self.clip_resolution, mode='bilinear', align_corners=False, )
                 clip_images_resized = clip_images
+                sam_images_resized = F.interpolate(clip_images, size=self.sam_resolution, mode='bilinear', align_corners=False, )
                 self.layers = []
                 clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images, dense=True)
         # images = [x["image"].to(self.device) for x in batched_inputs]
@@ -275,13 +267,31 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         clip_patch_last_unfold = rearrange(clip_patch_tokens,"B (H W) C -> B C H W", H=24 )
        #  clip_patch_last_upsample = self.clip_feat_upsample(clip_patch_last_unfold) # use
         # print(clip_features.shape) [4, 577, 512]
-        dino_feat = self.dino_model.get_intermediate_layers(clip_images_resized, n=12) # actually only 12 layers, but use a large num to avoid ambiguity
-        dino_patch_feat_last_unfold = rearrange(dino_feat[-1][:,1:,:],"B (H W) C -> B C H W", H=48)
-        dino_feat_down = self.dino_down_sample(dino_patch_feat_last_unfold) # B,512,24,24
+        sam_feat = self.sam_encoder.get_intermediate_layers(sam_images_resized)
+        # for feat in sam_feat:
+            # print(feat.shape)
+
+        sam_feat_L4 = rearrange(sam_feat[3], "B H W C -> B C H W", H=64)
+        sam_feat_L8 = rearrange(sam_feat[7], "B H W C -> B C H W", H=64)
+        sam_feat_L4 = self.sam_decod_proj1(sam_feat_L4)
+        sam_feat_L4 = F.interpolate(sam_feat_L4, size = (48,48),mode='bilinear', align_corners=False)
+        sam_feat_L8 = self.sam_decod_proj2(sam_feat_L8)
+        sam_feat_L8 = F.interpolate(sam_feat_L8, size = (96,96),mode='bilinear', align_corners=False)
+        sam_feat = sam_feat[-1]
+        sam_feat = self.sam_last_proj(sam_feat)
+        sam_feat = F.interpolate(sam_feat, size = (24,24),mode='bilinear', align_corners=False)
+        sam_feat_guidance=[sam_feat_L4, sam_feat_L8]
+
+        # print(patch_embeddings.shape)
+       #  print('sam_loaded')
+
+        # dino_feat = self.dino_model.get_intermediate_layers(clip_images_resized, n=12) # actually only 12 layers, but use a large num to avoid ambiguity
+        # dino_patch_feat_last_unfold = rearrange(dino_feat[-1][:,1:,:],"B (H W) C -> B C H W", H=48)
+        # dino_feat_down = self.dino_down_sample(dino_patch_feat_last_unfold) # B,512,24,24
         
         
-        dino_feat_L4 = rearrange(dino_feat[3][:,1:,:],"B (H W) C -> B C H W", H=48)
-        dino_feat_L8 = rearrange(dino_feat[7][:,1:,:],"B (H W) C -> B C H W", H=48)
+        # dino_feat_L4 = rearrange(dino_feat[3][:,1:,:],"B (H W) C -> B C H W", H=48)
+        # dino_feat_L8 = rearrange(dino_feat[7][:,1:,:],"B (H W) C -> B C H W", H=48)
         # print(clip_patch_last_unfold.shape) torch.Size([4, 512, 24, 24])
         # print(clip_path_last_upsample.shape) torch.Size([4, 768, 48, 48])
         # dino_cat_clip_on_C = torch.cat([dino_patch_feat_last_unfold,clip_patch_last_upsample],dim=1)
@@ -305,9 +315,9 @@ class ImplicitFusionCATSegVer09c(nn.Module):
        
         res4 = self.upsample1(res4)
         res5 = self.upsample2(res5)
-        dino_feat_L4_proj = self.dino_decod_proj1(dino_feat_L4)
-        dino_feat_L8_proj = self.dino_decod_proj2(dino_feat_L8)
-        dino_feat_guidance = [dino_feat_L4_proj,dino_feat_L8_proj]
+        # dino_feat_L4_proj = self.dino_decod_proj1(dino_feat_L4)
+        # dino_feat_L8_proj = self.dino_decod_proj2(dino_feat_L8)
+        # dino_feat_guidance = [dino_feat_L4_proj,dino_feat_L8_proj]
 
         clip_features_guidance = {'res5': res5, 'res4': res4, 'res3': res3,}
         # print('clip_features', clip_features.shape)
@@ -322,7 +332,8 @@ class ImplicitFusionCATSegVer09c(nn.Module):
         
         # outputs = self.sem_seg_head(clip_features, features)
 
-        outputs = self.sem_seg_head(clip_features,dino_feat_down, clip_features_guidance, dino_feat_guidance)
+        outputs = self.sem_seg_head(clip_features,sam_feat, clip_features_guidance, sam_feat_guidance)
+
         if self.training:
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)

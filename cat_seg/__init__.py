@@ -33,9 +33,12 @@ from .implicit_fusion_Ver09a import ImplicitFusionCATSegVer09a
 from .implicit_fusion_Ver09b import ImplicitFusionCATSegVer09b
 from .implicit_fusion_Ver09c import ImplicitFusionCATSegVer09c
 from .implicit_fusion_Ver09d import ImplicitFusionCATSegVer09d
+from .implicit_fusion_Ver09e import ImplicitFusionCATSegVer09e
 from .implicit_fusion_Ver10 import ImplicitFusionCATSegVer10
 from .implicit_fusion_Ver11 import ImplicitFusionCATSegVer11
 from .implicit_fusion_Ver12 import ImplicitFusionCATSegVer12
+from .implicit_fusion_Ver12a import ImplicitFusionCATSegVer12a
+from .implicit_fusion_Ver13 import ImplicitFusionCATSegVer13
 from .vision_transformer import vit_base
 
 
