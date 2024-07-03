@@ -1,8 +1,8 @@
 # export CUDA_VISIBLE_DEVICES=0
 export DETECTRON2_DATASETS='/home/zpp2/ycy/datasets'
 export TORCH_DISTRIBUTED_DEBUG=INFO
-RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver1.4a
-META_ARCH=ImplicitFusionCATSegVer14a
+RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver1.4
+META_ARCH=ImplicitFusionCATSegVer14
 SEG_HEAD=FusionHeadVer14
 CLIP_FT=attention
 
