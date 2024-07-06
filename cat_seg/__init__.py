@@ -41,6 +41,10 @@ from .implicit_fusion_Ver12a import ImplicitFusionCATSegVer12a
 from .implicit_fusion_Ver13 import ImplicitFusionCATSegVer13
 from .implicit_fusion_Ver14 import ImplicitFusionCATSegVer14
 from .implicit_fusion_Ver14a import ImplicitFusionCATSegVer14a
+from .implicit_fusion_Ver14b import ImplicitFusionCATSegVer14b
+from .implicit_fusion_Ver14c import ImplicitFusionCATSegVer14c
+from .implicit_fusion_Ver14d import ImplicitFusionCATSegVer14d
+from .implicit_fusion_Ver14e import ImplicitFusionCATSegVer14e
 from .vision_transformer import vit_base
 
 
