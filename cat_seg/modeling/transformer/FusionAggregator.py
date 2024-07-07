@@ -770,7 +770,421 @@ class FusionUP(nn.Module):
             dino_guidance = repeat(dino_guidance, "B C H W -> (B T) C H W", T=T)
             x = torch.cat([x, clip_guidance,dino_guidance], dim=1)
         return self.conv(x)
+    
+class FusionAggregatorVer14g(nn.Module):
+    def __init__(self, 
+        text_guidance_dim=512,
+        text_guidance_proj_dim=128,
+        appearance_guidance_dim=512,
+        appearance_guidance_proj_dim=128,
+        # decoder_dims = (64, 32),
+        decoder_dims = (128,96,64,32),
+        decoder_guidance_dims=(256, 128),
+        decoder_guidance_proj_dims=(32, 16),
+        num_layers=4,
+        nheads=4, 
+        hidden_dim=128,
+        pooling_size=(6, 6),
+        feature_resolution=(24, 24),
+        window_size=12,
+        attention_type='linear',
+        prompt_channel=1,
+        pad_len=256,
+    ) -> None:
+        """
+        Cost Aggregation Model for CAT-Seg
+        Args:
+            text_guidance_dim: Dimension of text guidance
+            text_guidance_proj_dim: Dimension of projected text guidance
+            appearance_guidance_dim: Dimension of appearance guidance
+            appearance_guidance_proj_dim: Dimension of projected appearance guidance
+            decoder_dims: Upsampling decoder dimensions
+            decoder_guidance_dims: Upsampling decoder guidance dimensions
+            decoder_guidance_proj_dims: Upsampling decoder guidance projected dimensions
+            num_layers: Number of layers for the aggregator
+            nheads: Number of attention heads
+            hidden_dim: Hidden dimension for transformer blocks
+            pooling_size: Pooling size for the class aggregation layer
+                          To reduce computation, we apply pooling in class aggregation blocks to reduce the number of tokens during training
+            feature_resolution: Feature resolution for spatial aggregation
+            window_size: Window size for Swin block in spatial aggregation
+            attention_type: Attention type for the class aggregation. 
+            prompt_channel: Number of prompts for ensembling text features. Default: 1
+            pad_len: Padding length for the class aggregation. Default: 256
+                     pad_len enforces the class aggregation block to have a fixed length of tokens for all inputs
+                     This means it either pads the sequence with learnable tokens in class aggregation,
+                     or truncates the classes with the initial CLIP cosine-similarity scores.
+                     Set pad_len to 0 to disable this feature.
+            """
+        super().__init__()
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.num_corr_projector = 3
+        self.cat_corr_proj_dim=[1024,512,256,128]
+        self.corr_proj_layers = nn.ModuleList([[nn.Conv2d(in_channels=self.cat_corr_proj_dim[proj_ind],
+                                                          out_channels=self.cat_corr_proj_dim[proj_ind+1], 
+                                                          kernel_size=7,stride=1,padding=3),
+                                               nn.ReLU()] for proj_ind in range(self.num_corr_projector)])
+        self.layers = nn.ModuleList([
+            AggregatorLayer(
+                hidden_dim=hidden_dim, text_guidance_dim=text_guidance_proj_dim, appearance_guidance=appearance_guidance_proj_dim, 
+                nheads=nheads, input_resolution=feature_resolution, pooling_size=pooling_size, window_size=window_size, attention_type=attention_type, pad_len=pad_len,
+            ) for _ in range(num_layers)
+        ])
+        
+        # self.conv1 = nn.Conv2d(prompt_channel, hidden_dim, kernel_size=7, stride=1, padding=3)
 
+        self.guidance_projection = nn.Sequential(
+            nn.Conv2d(appearance_guidance_dim, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+        ) if appearance_guidance_dim > 0 else None
+
+        self.text_guidance_projection = nn.Sequential(
+            nn.Linear(text_guidance_dim, text_guidance_proj_dim),
+            nn.ReLU(),
+        ) if text_guidance_dim > 0 else None
+
+        self.decoder_guidance_projection = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(d, dp, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+            ) for d, dp in zip(decoder_guidance_dims, decoder_guidance_proj_dims)
+        ]) if decoder_guidance_dims[0] > 0 else None
+        self.cat_corr_embed = nn.Conv2d(1024, hidden_dim, kernel_size=1, stride=1, padding=0)
+        # Ver14e
+        # self.gw_corr_embed = nn.Conv2d(32, hidden_dim, kernel_size=1, stride=1, padding=0)
+        # self.fusion_corr_embed = nn.Conv2d(2*hidden_dim,hidden_dim,kernel_size=7, stride=1, padding=3)
+        # Ver14e
+        self.decoder1 = UPmy(hidden_dim, decoder_dims[0], decoder_guidance_proj_dims[0])
+        self.decoder2 = UPmy(decoder_dims[0], decoder_dims[1], decoder_guidance_proj_dims[1])
+        self.decoder3 = UPmy(decoder_dims[1], decoder_dims[2], 0)
+        self.decoder4 = UPmy(decoder_dims[2], decoder_dims[3], 0)
+        # self.head = nn.Conv2d(decoder_dims[1], 1, kernel_size=3, stride=1, padding=1)
+        self.head = nn.Conv2d(decoder_dims[3], 1, kernel_size=3, stride=1, padding=1)
+
+        self.pad_len = pad_len
+
+    def feature_map(self, img_feats, text_feats):
+        # concatenated feature volume for feature aggregation baselines
+        img_feats = F.normalize(img_feats, dim=1) # B C H W
+        img_feats = repeat(img_feats, "B C H W -> B C T H W", T=text_feats.shape[1])
+        text_feats = F.normalize(text_feats, dim=-1) # B T P C
+        text_feats = text_feats.mean(dim=-2) # average text features over different prompts
+        text_feats = F.normalize(text_feats, dim=-1) # B T C
+        text_feats = repeat(text_feats, "B T C -> B C T H W", H=img_feats.shape[-2], W=img_feats.shape[-1])
+        return torch.cat((img_feats, text_feats), dim=1) # B 2C T H W
+
+    def correlation(self, img_feats, text_feats):
+        img_feats = F.normalize(img_feats, dim=1) # B C H W
+        text_feats = F.normalize(text_feats, dim=-1) # B T P C
+        corr = torch.einsum('bchw, btpc -> bpthw', img_feats, text_feats)
+        return corr
+    # def group_wise_correlation(self, img_feats, text_feats, group_nums = 32):
+    #     '''
+    #     Return B P N T H W, wheareas N is the group number, P is prompt number, T is class number
+    #     '''
+    #     class_num = text_feats.shape[1]
+    #     N_g = group_nums
+    #     group_img_feats = rearrange(img_feats, 'B (C N) H W ->(B N) C H W', N=N_g)
+    #     group_text_feats = rearrange(text_feats, 'B T P (C N) ->(B N) T P C', N=N_g)
+    #     group_img_feats = F.normalize(group_img_feats, dim=1)
+    #     group_text_feats = F.normalize(group_text_feats, dim = -1)
+    #     group_corr = torch.einsum('bchw, btpc -> bpthw', group_img_feats, group_text_feats)
+    #     group_corr = group_corr.squeeze(1)
+    #     # group_corr = rearrange(group_corr,'(B N) T H W -> B N T H W', N = N_g)
+    #     group_corr = rearrange(group_corr,'(B N) T H W -> (B T) N H W', N = N_g)
+    #     group_corr_embed = self.gw_corr_embed(group_corr)
+    #     #group_corr_embed = rearrange(group_corr,'(B T) C H W -> B T C H W', T = class_num)
+    #     return group_corr_embed
+    def concatenation_correlation(self, img_feats, text_feats):
+        class_num = text_feats.shape[1]
+        H, W = img_feats.shape[-2], img_feats.shape[-1]
+        img_feats=img_feats.unsqueeze(1).repeat([1,class_num,1,1,1])
+        img_feats = rearrange(img_feats, 'B T C H W -> (B T) C H W')
+        text_feats=text_feats.unsqueeze(-1).unsqueeze(-1).repeat([1,1,1,1,H,W])
+        text_feats = rearrange(text_feats,'B T 1 C H W -> (B T) C H W')
+        cat_feats = torch.cat([img_feats,text_feats],dim=1) # C=256
+        # cat_corr_embed = self.cat_corr_embed(cat_feats)
+        #cat_corr_embed = rearrange(cat_corr_embed,'(B T) C H W -> B T C H W',T = class_num)
+        return cat_feats
+    # def corr_embed(self, x):
+    #     B = x.shape[0]
+    #     corr_embed = rearrange(x, 'B P T H W -> (B T) P H W')
+    #     corr_embed = self.conv1(corr_embed)
+    #     corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W', B=B)
+    #     return corr_embed
+    
+    def corr_projection(self, x, proj):
+        corr_embed = rearrange(x, 'B C T H W -> B T H W C')
+        corr_embed = proj(corr_embed)
+        corr_embed = rearrange(corr_embed, 'B T H W C -> B C T H W')
+        return corr_embed
+
+    def upsample(self, x):
+        B = x.shape[0]
+        corr_embed = rearrange(x, 'B C T H W -> (B T) C H W')
+        corr_embed = F.interpolate(corr_embed, scale_factor=2, mode='bilinear', align_corners=True)
+        corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W', B=B)
+        return corr_embed
+
+    def conv_decoder(self, x, guidance):
+        B = x.shape[0]
+        corr_embed = rearrange(x, 'B C T H W -> (B T) C H W')
+        corr_embed = self.decoder1(corr_embed, guidance[0])
+        corr_embed = self.decoder2(corr_embed, guidance[1])
+        corr_embed = self.decoder3(corr_embed, None)
+        corr_embed = self.decoder4(corr_embed, None)
+        corr_embed = self.head(corr_embed)
+        corr_embed = rearrange(corr_embed, '(B T) () H W -> B T H W', B=B)
+        return corr_embed
+    
+    def forward(self, img_feats, text_feats, appearance_guidance):
+        """
+        Arguments:
+            img_feats: (B, C, H, W)
+            text_feats: (B, T, P, C) T是类别的个数
+            apperance_guidance: tuple of (B, C, H, W)
+        """
+
+        classes = None
+
+        # corr = self.correlation(img_feats, text_feats)
+        T = text_feats.shape[1]
+        # gw_corr = self.group_wise_correlation(img_feats, text_feats)
+        cat_feats = self.concatenation_correlation(img_feats, text_feats) # (B T) C H W
+        # dual_corr = torch.cat([gw_corr,cat_corr],dim = 1 )
+        # corr_embed = self.fusion_corr_embed(dual_corr)
+        corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W',T=T)
+        for proj_layer in self.corr_proj_layers:
+            corr_embed = proj_layer(corr_embed)
+        print('success')
+        exit()
+        #corr = self.feature_map(img_feats, text_feats)
+        # corr_embed = self.corr_embed(corr)
+
+        projected_guidance, projected_text_guidance, projected_decoder_guidance = None, None, [None, None]
+        if self.guidance_projection is not None:
+            projected_guidance = self.guidance_projection(appearance_guidance[0])
+
+        if self.decoder_guidance_projection is not None:
+            projected_decoder_guidance = [proj(g) for proj, g in zip(self.decoder_guidance_projection, appearance_guidance[1:])]
+
+        if self.text_guidance_projection is not None:
+            text_feats = text_feats.mean(dim=-2)
+            text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
+            projected_text_guidance = self.text_guidance_projection(text_feats)
+
+        for layer in self.layers:
+            corr_embed = layer(corr_embed, projected_guidance, projected_text_guidance)
+
+        logit = self.conv_decoder(corr_embed, projected_decoder_guidance)
+
+        return logit    
+    
+class FusionAggregatorVer14f(nn.Module):
+    def __init__(self, 
+        text_guidance_dim=512,
+        text_guidance_proj_dim=128,
+        appearance_guidance_dim=512,
+        appearance_guidance_proj_dim=128,
+        # decoder_dims = (64, 32),
+        decoder_dims = (128,96,64,32),
+        decoder_guidance_dims=(256, 128),
+        decoder_guidance_proj_dims=(32, 16),
+        num_layers=4,
+        nheads=4, 
+        hidden_dim=128,
+        pooling_size=(6, 6),
+        feature_resolution=(24, 24),
+        window_size=12,
+        attention_type='linear',
+        prompt_channel=1,
+        pad_len=256,
+    ) -> None:
+        """
+        Cost Aggregation Model for CAT-Seg
+        Args:
+            text_guidance_dim: Dimension of text guidance
+            text_guidance_proj_dim: Dimension of projected text guidance
+            appearance_guidance_dim: Dimension of appearance guidance
+            appearance_guidance_proj_dim: Dimension of projected appearance guidance
+            decoder_dims: Upsampling decoder dimensions
+            decoder_guidance_dims: Upsampling decoder guidance dimensions
+            decoder_guidance_proj_dims: Upsampling decoder guidance projected dimensions
+            num_layers: Number of layers for the aggregator
+            nheads: Number of attention heads
+            hidden_dim: Hidden dimension for transformer blocks
+            pooling_size: Pooling size for the class aggregation layer
+                          To reduce computation, we apply pooling in class aggregation blocks to reduce the number of tokens during training
+            feature_resolution: Feature resolution for spatial aggregation
+            window_size: Window size for Swin block in spatial aggregation
+            attention_type: Attention type for the class aggregation. 
+            prompt_channel: Number of prompts for ensembling text features. Default: 1
+            pad_len: Padding length for the class aggregation. Default: 256
+                     pad_len enforces the class aggregation block to have a fixed length of tokens for all inputs
+                     This means it either pads the sequence with learnable tokens in class aggregation,
+                     or truncates the classes with the initial CLIP cosine-similarity scores.
+                     Set pad_len to 0 to disable this feature.
+            """
+        super().__init__()
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+
+        self.layers = nn.ModuleList([
+            AggregatorLayer(
+                hidden_dim=hidden_dim, text_guidance_dim=text_guidance_proj_dim, appearance_guidance=appearance_guidance_proj_dim, 
+                nheads=nheads, input_resolution=feature_resolution, pooling_size=pooling_size, window_size=window_size, attention_type=attention_type, pad_len=pad_len,
+            ) for _ in range(num_layers)
+        ])
+
+        # self.conv1 = nn.Conv2d(prompt_channel, hidden_dim, kernel_size=7, stride=1, padding=3)
+
+        self.guidance_projection = nn.Sequential(
+            nn.Conv2d(appearance_guidance_dim, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+        ) if appearance_guidance_dim > 0 else None
+
+        self.text_guidance_projection = nn.Sequential(
+            nn.Linear(text_guidance_dim, text_guidance_proj_dim),
+            nn.ReLU(),
+        ) if text_guidance_dim > 0 else None
+
+        self.decoder_guidance_projection = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(d, dp, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+            ) for d, dp in zip(decoder_guidance_dims, decoder_guidance_proj_dims)
+        ]) if decoder_guidance_dims[0] > 0 else None
+        # self.cat_corr_embed = nn.Conv2d(1024, hidden_dim, kernel_size=1, stride=1, padding=0)
+        # Ver14e
+        self.gw_corr_embed = nn.Conv2d(32, hidden_dim, kernel_size=7, stride=1, padding=3)
+        # self.fusion_corr_embed = nn.Conv2d(2*hidden_dim,hidden_dim,kernel_size=7, stride=1, padding=3)
+        # Ver14e
+        self.decoder1 = UPmy(hidden_dim, decoder_dims[0], decoder_guidance_proj_dims[0])
+        self.decoder2 = UPmy(decoder_dims[0], decoder_dims[1], decoder_guidance_proj_dims[1])
+        self.decoder3 = UPmy(decoder_dims[1], decoder_dims[2], 0)
+        self.decoder4 = UPmy(decoder_dims[2], decoder_dims[3], 0)
+        # self.head = nn.Conv2d(decoder_dims[1], 1, kernel_size=3, stride=1, padding=1)
+        self.head = nn.Conv2d(decoder_dims[3], 1, kernel_size=3, stride=1, padding=1)
+
+        self.pad_len = pad_len
+
+    def feature_map(self, img_feats, text_feats):
+        # concatenated feature volume for feature aggregation baselines
+        img_feats = F.normalize(img_feats, dim=1) # B C H W
+        img_feats = repeat(img_feats, "B C H W -> B C T H W", T=text_feats.shape[1])
+        text_feats = F.normalize(text_feats, dim=-1) # B T P C
+        text_feats = text_feats.mean(dim=-2) # average text features over different prompts
+        text_feats = F.normalize(text_feats, dim=-1) # B T C
+        text_feats = repeat(text_feats, "B T C -> B C T H W", H=img_feats.shape[-2], W=img_feats.shape[-1])
+        return torch.cat((img_feats, text_feats), dim=1) # B 2C T H W
+
+    def correlation(self, img_feats, text_feats):
+        img_feats = F.normalize(img_feats, dim=1) # B C H W
+        text_feats = F.normalize(text_feats, dim=-1) # B T P C
+        corr = torch.einsum('bchw, btpc -> bpthw', img_feats, text_feats)
+        return corr
+    def group_wise_correlation(self, img_feats, text_feats, group_nums = 32):
+        '''
+        Return B P N T H W, wheareas N is the group number, P is prompt number, T is class number
+        '''
+        class_num = text_feats.shape[1]
+        N_g = group_nums
+        group_img_feats = rearrange(img_feats, 'B (C N) H W ->(B N) C H W', N=N_g)
+        group_text_feats = rearrange(text_feats, 'B T P (C N) ->(B N) T P C', N=N_g)
+        group_img_feats = F.normalize(group_img_feats, dim=1)
+        group_text_feats = F.normalize(group_text_feats, dim = -1)
+        group_corr = torch.einsum('bchw, btpc -> bpthw', group_img_feats, group_text_feats)
+        group_corr = group_corr.squeeze(1)
+        # group_corr = rearrange(group_corr,'(B N) T H W -> B N T H W', N = N_g)
+        group_corr = rearrange(group_corr,'(B N) T H W -> (B T) N H W', N = N_g)
+        
+        #group_corr_embed = rearrange(group_corr,'(B T) C H W -> B T C H W', T = class_num)
+        return group_corr
+    def concatenation_correlation(self, img_feats, text_feats):
+        class_num = text_feats.shape[1]
+        H, W = img_feats.shape[-2], img_feats.shape[-1]
+        img_feats=img_feats.unsqueeze(1).repeat([1,class_num,1,1,1])
+        img_feats = rearrange(img_feats, 'B T C H W -> (B T) C H W')
+        text_feats=text_feats.unsqueeze(-1).unsqueeze(-1).repeat([1,1,1,1,H,W])
+        text_feats = rearrange(text_feats,'B T 1 C H W -> (B T) C H W')
+        cat_feats = torch.cat([img_feats,text_feats],dim=1) # C=256
+        cat_corr_embed = self.cat_corr_embed(cat_feats)
+        #cat_corr_embed = rearrange(cat_corr_embed,'(B T) C H W -> B T C H W',T = class_num)
+        return cat_corr_embed
+    # def corr_embed(self, x):
+    #     B = x.shape[0]
+    #     corr_embed = rearrange(x, 'B P T H W -> (B T) P H W')
+    #     corr_embed = self.conv1(corr_embed)
+    #     corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W', B=B)
+    #     return corr_embed
+    
+    def corr_projection(self, x, proj):
+        corr_embed = rearrange(x, 'B C T H W -> B T H W C')
+        corr_embed = proj(corr_embed)
+        corr_embed = rearrange(corr_embed, 'B T H W C -> B C T H W')
+        return corr_embed
+
+    def upsample(self, x):
+        B = x.shape[0]
+        corr_embed = rearrange(x, 'B C T H W -> (B T) C H W')
+        corr_embed = F.interpolate(corr_embed, scale_factor=2, mode='bilinear', align_corners=True)
+        corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W', B=B)
+        return corr_embed
+
+    def conv_decoder(self, x, guidance):
+        B = x.shape[0]
+        corr_embed = rearrange(x, 'B C T H W -> (B T) C H W')
+        corr_embed = self.decoder1(corr_embed, guidance[0])
+        corr_embed = self.decoder2(corr_embed, guidance[1])
+        corr_embed = self.decoder3(corr_embed, None)
+        corr_embed = self.decoder4(corr_embed, None)
+        corr_embed = self.head(corr_embed)
+        corr_embed = rearrange(corr_embed, '(B T) () H W -> B T H W', B=B)
+        return corr_embed
+    
+    def forward(self, img_feats, text_feats, appearance_guidance):
+        """
+        Arguments:
+            img_feats: (B, C, H, W)
+            text_feats: (B, T, P, C) T是类别的个数
+            apperance_guidance: tuple of (B, C, H, W)
+        """
+
+        classes = None
+
+        # corr = self.correlation(img_feats, text_feats)
+        T = text_feats.shape[1]
+        gw_corr = self.group_wise_correlation(img_feats, text_feats)
+        group_corr_embed = self.gw_corr_embed(gw_corr)
+        # cat_corr = self.concatenation_correlation(img_feats, text_feats) # (B T) C H W
+        #dual_corr = torch.cat([gw_corr,cat_corr],dim = 1 )
+        #corr_embed = self.fusion_corr_embed(dual_corr)
+        
+        corr_embed = group_corr_embed
+        corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W',T=T)
+        # print('group only success')
+        #corr = self.feature_map(img_feats, text_feats)
+        # corr_embed = self.corr_embed(corr)
+
+        projected_guidance, projected_text_guidance, projected_decoder_guidance = None, None, [None, None]
+        if self.guidance_projection is not None:
+            projected_guidance = self.guidance_projection(appearance_guidance[0])
+
+        if self.decoder_guidance_projection is not None:
+            projected_decoder_guidance = [proj(g) for proj, g in zip(self.decoder_guidance_projection, appearance_guidance[1:])]
+
+        if self.text_guidance_projection is not None:
+            text_feats = text_feats.mean(dim=-2)
+            text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
+            projected_text_guidance = self.text_guidance_projection(text_feats)
+
+        for layer in self.layers:
+            corr_embed = layer(corr_embed, projected_guidance, projected_text_guidance)
+
+        logit = self.conv_decoder(corr_embed, projected_decoder_guidance)
+
+        return logit
 class FusionAggregatorVer14e(nn.Module):
     def __init__(self, 
         text_guidance_dim=512,
@@ -846,8 +1260,10 @@ class FusionAggregatorVer14e(nn.Module):
             ) for d, dp in zip(decoder_guidance_dims, decoder_guidance_proj_dims)
         ]) if decoder_guidance_dims[0] > 0 else None
         self.cat_corr_embed = nn.Conv2d(1024, hidden_dim, kernel_size=1, stride=1, padding=0)
+        # Ver14e
         self.gw_corr_embed = nn.Conv2d(32, hidden_dim, kernel_size=1, stride=1, padding=0)
         self.fusion_corr_embed = nn.Conv2d(2*hidden_dim,hidden_dim,kernel_size=7, stride=1, padding=3)
+        # Ver14e
         self.decoder1 = UPmy(hidden_dim, decoder_dims[0], decoder_guidance_proj_dims[0])
         self.decoder2 = UPmy(decoder_dims[0], decoder_dims[1], decoder_guidance_proj_dims[1])
         self.decoder3 = UPmy(decoder_dims[1], decoder_dims[2], 0)
