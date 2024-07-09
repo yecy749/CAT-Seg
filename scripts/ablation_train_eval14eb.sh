@@ -1,9 +1,9 @@
 # export CUDA_VISIBLE_DEVICES=0
 export DETECTRON2_DATASETS='/home/zpp2/ycy/datasets'
-export TORCH_DISTRIBUTED_DEBUG=INFO
-RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver1.4i
+# export TORCH_DISTRIBUTED_DEBUG=INFO
+RESULTS=/media/zpp2/PHDD/output/new-cat-seg-results/Ver1.4eb
 META_ARCH=ImplicitFusionCATSegVer14e
-SEG_HEAD=FusionHeadVer14i
+SEG_HEAD=FusionHeadVer14eb
 CLIP_FT=attention
 
 
@@ -20,11 +20,10 @@ MODEL.SEM_SEG_HEAD.NAME $SEG_HEAD \
 MODEL.SEM_SEG_HEAD.CLIP_FINETUNE $CLIP_FT \
 TEST.EVAL_PERIOD 0 \
 SOLVER.IMS_PER_BATCH 4 \
-DATALOADER.NUM_WORKERS 16 \
+# DATALOADER.NUM_WORKERS 16 \
 
 
 # From Ver 0.7, we modify the seg_head
-
 sh eval_vanilla.sh configs/vitb_384.yaml 2 $RESULTS/EvalResults \
 MODEL.META_ARCHITECTURE $META_ARCH \
 MODEL.SEM_SEG_HEAD.NAME $SEG_HEAD \

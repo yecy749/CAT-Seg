@@ -12,13 +12,13 @@ from detectron2.config import configurable
 from detectron2.layers import Conv2d
 
 from .model import Aggregator
-from .FusionAggregator import FusionAggregatorVer14d
+from .FusionAggregator import FusionAggregatorVer14db
 from cat_seg.third_party import clip
 from cat_seg.third_party import imagenet_templates
 
 import numpy as np
 import open_clip
-class FusionPredictorVer14d(nn.Module):
+class FusionPredictorVer14db(nn.Module):
     @configurable
     def __init__(
         self,
@@ -95,7 +95,7 @@ class FusionPredictorVer14d(nn.Module):
         self.clip_model = clip_model.float()
         self.clip_preprocess = clip_preprocess
         
-        transformer = FusionAggregatorVer14d(
+        transformer = FusionAggregatorVer14db(
             text_guidance_dim=text_guidance_dim,
             text_guidance_proj_dim=text_guidance_proj_dim,
             appearance_guidance_dim=appearance_guidance_dim,
@@ -150,7 +150,8 @@ class FusionPredictorVer14d(nn.Module):
         return ret
 
     def forward(self, x, vis_guidance, prompt=None, gt_cls=None):
-        vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
+        # vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
+        vis = vis_guidance
         text = self.class_texts if self.training else self.test_class_texts
         text = [text[c] for c in gt_cls] if gt_cls is not None else text
 
