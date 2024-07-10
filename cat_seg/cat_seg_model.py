@@ -78,8 +78,8 @@ class CATSeg(nn.Module):
         self.clip_resolution = (384, 384) if clip_pretrained == "ViT-B/16" else (336, 336)
 
         self.proj_dim = 768 if clip_pretrained == "ViT-B/16" else 1024
-        self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
-        self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
+        # self.upsample1 = nn.ConvTranspose2d(self.proj_dim, 256, kernel_size=2, stride=2)
+        # self.upsample2 = nn.ConvTranspose2d(self.proj_dim, 128, kernel_size=4, stride=4)
 
         self.layer_indexes = [3, 7] if clip_pretrained == "ViT-B/16" else [7, 15] 
         self.layers = []
@@ -181,8 +181,8 @@ class CATSeg(nn.Module):
         res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
         res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
         res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
-        res4 = self.upsample1(res4)
-        res5 = self.upsample2(res5)
+        #res4 = self.upsample1(res4)
+        # res5 = self.upsample2(res5)
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
 
         outputs = self.sem_seg_head(clip_features, features)
