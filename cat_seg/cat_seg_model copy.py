@@ -133,47 +133,18 @@ class CATSeg(nn.Module):
                     The prediction has shape KxHxW that represents the logits of
                     each class for each pixel.
         """
-        if self.training:
-            images = [x["image"].to(self.device) for x in batched_inputs]
-            # images_shape: 384*384
-            clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
-            clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
         
-            self.layers = []
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        if not self.training and self.sliding_window:
+            return self.inference_sliding_window(batched_inputs)
 
-            clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
+        clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
+        clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
 
-            clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
-        elif not self.sliding_window:
-            with torch.no_grad():
-                images = [x["image"].to(self.device) for x in batched_inputs]
-                # images_shape: 384*384
-                clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
-                clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
-                self.layers = []
-                clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
-                clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
-        elif self.sliding_window:
-            with torch.no_grad():
-                kernel=384
-                overlap=0.333
-                out_res=[640, 640]
-                images = [x["image"].to(self.device, dtype=torch.float32) for x in batched_inputs]
-                stride = int(kernel * (1 - overlap))
-                unfold = nn.Unfold(kernel_size=kernel, stride=stride)
-                fold = nn.Fold(out_res, kernel_size=kernel, stride=stride)
+        self.layers = []
 
-                image = F.interpolate(images[0].unsqueeze(0), size=out_res, mode='bilinear', align_corners=False).squeeze()
-                image = rearrange(unfold(image), "(C H W) L-> L C H W", C=3, H=kernel)
-                global_image = F.interpolate(images[0].unsqueeze(0), size=(kernel, kernel), mode='bilinear', align_corners=False)
-                image = torch.cat((image, global_image), dim=0)
-
-                images = (image - self.pixel_mean) / self.pixel_std
-                clip_images = (image - self.clip_pixel_mean) / self.clip_pixel_std
-                clip_images = F.interpolate(clip_images, size=self.clip_resolution, mode='bilinear', align_corners=False, )
-                clip_images_resized = clip_images
-                self.layers = []
-                clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images, dense=True)
+        clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
+        clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
 
         image_features = clip_features[:, 1:, :]
 
@@ -201,29 +172,53 @@ class CATSeg(nn.Module):
             loss = F.binary_cross_entropy_with_logits(outputs, _targets)
             losses = {"loss_sem_seg" : loss}
             return losses
-        elif self.sliding_window:
-            with torch.no_grad():
-                outputs = F.interpolate(outputs, size=kernel, mode="bilinear", align_corners=False)
-                outputs = outputs.sigmoid()
-                
-                global_output = outputs[-1:]
-                global_output = F.interpolate(global_output, size=out_res, mode='bilinear', align_corners=False,)
-                outputs = outputs[:-1]
-                outputs = fold(outputs.flatten(1).T) / fold(unfold(torch.ones([1] + out_res, device=self.device)))
-                outputs = (outputs + global_output) / 2.
 
-                height = batched_inputs[0].get("height", out_res[0])
-                width = batched_inputs[0].get("width", out_res[1])
-                output = sem_seg_postprocess(outputs[0], out_res, height, width)
-                return [{'sem_seg': output}]
-        
         else:
-            with torch.no_grad():
-                outputs = outputs.sigmoid()
-                image_size = clip_images.image_sizes[0]
-                height = batched_inputs[0].get("height", image_size[0])
-                width = batched_inputs[0].get("width", image_size[1])
+            outputs = outputs.sigmoid()
+            image_size = clip_images.image_sizes[0]
+            height = batched_inputs[0].get("height", image_size[0])
+            width = batched_inputs[0].get("width", image_size[1])
 
-                output = sem_seg_postprocess(outputs[0], image_size, height, width)
-                processed_results = [{'sem_seg': output}]
-                return processed_results        
+            output = sem_seg_postprocess(outputs[0], image_size, height, width)
+            processed_results = [{'sem_seg': output}]
+            return processed_results
+
+
+    @torch.no_grad()
+    def inference_sliding_window(self, batched_inputs, kernel=384, overlap=0.333, out_res=[640, 640]):
+        images = [x["image"].to(self.device, dtype=torch.float32) for x in batched_inputs]
+        stride = int(kernel * (1 - overlap))
+        unfold = nn.Unfold(kernel_size=kernel, stride=stride)
+        fold = nn.Fold(out_res, kernel_size=kernel, stride=stride)
+
+        image = F.interpolate(images[0].unsqueeze(0), size=out_res, mode='bilinear', align_corners=False).squeeze()
+        image = rearrange(unfold(image), "(C H W) L-> L C H W", C=3, H=kernel)
+        global_image = F.interpolate(images[0].unsqueeze(0), size=(kernel, kernel), mode='bilinear', align_corners=False)
+        image = torch.cat((image, global_image), dim=0)
+
+        images = (image - self.pixel_mean) / self.pixel_std
+        clip_images = (image - self.clip_pixel_mean) / self.clip_pixel_std
+        clip_images = F.interpolate(clip_images, size=self.clip_resolution, mode='bilinear', align_corners=False, )
+        
+        self.layers = []
+        clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images, dense=True)
+        res3 = rearrange(clip_features[:, 1:, :], "B (H W) C -> B C H W", H=24)
+        res4 = self.upsample1(rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24))
+        res5 = self.upsample2(rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24))
+
+        features = {'res5': res5, 'res4': res4, 'res3': res3,}
+        outputs = self.sem_seg_head(clip_features, features)
+        
+        outputs = F.interpolate(outputs, size=kernel, mode="bilinear", align_corners=False)
+        outputs = outputs.sigmoid()
+        
+        global_output = outputs[-1:]
+        global_output = F.interpolate(global_output, size=out_res, mode='bilinear', align_corners=False,)
+        outputs = outputs[:-1]
+        outputs = fold(outputs.flatten(1).T) / fold(unfold(torch.ones([1] + out_res, device=self.device)))
+        outputs = (outputs + global_output) / 2.
+
+        height = batched_inputs[0].get("height", out_res[0])
+        width = batched_inputs[0].get("width", out_res[1])
+        output = sem_seg_postprocess(outputs[0], out_res, height, width)
+        return [{'sem_seg': output}]

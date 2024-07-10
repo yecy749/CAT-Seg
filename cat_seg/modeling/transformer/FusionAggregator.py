@@ -2832,6 +2832,8 @@ class ClipDenseProjLayer(nn.Module):
     def forward(self, clip_feat_list):
         # B L C 
         # C=appearance_guidance_proj_dim
+        # print(self.sigma)
+        # exit()
         B = clip_feat_list[0].shape[0]
         L = clip_feat_list[0].shape[1]
         C = self.appearance_guidance_proj_dim
@@ -2986,8 +2988,6 @@ class FusionAggregatorVer14db(nn.Module):
         corr_embed = rearrange(x, 'B C T H W -> (B T) C H W')
         corr_embed = self.decoder1(corr_embed, guidance[0])
         corr_embed = self.decoder2(corr_embed, guidance[1])
-        corr_embed = self.decoder3(corr_embed, None)
-        corr_embed = self.decoder4(corr_embed, None)
         corr_embed = self.head(corr_embed)
         corr_embed = rearrange(corr_embed, '(B T) () H W -> B T H W', B=B)
         return corr_embed
@@ -3032,7 +3032,192 @@ class FusionAggregatorVer14db(nn.Module):
 
  
         return logit
+class FusionAggregatorVer14dc(nn.Module):
+    def __init__(self, 
+        text_guidance_dim=512,
+        text_guidance_proj_dim=128,
+        appearance_guidance_dim=512,
+        appearance_guidance_proj_dim=128,
+        # decoder_dims = (64, 32),
+        decoder_dims = (128,96,64,32),
+        decoder_guidance_dims=(256, 128),
+        decoder_guidance_proj_dims=(32, 16),
+        num_layers=4,
+        nheads=4, 
+        hidden_dim=128,
+        pooling_size=(6, 6),
+        feature_resolution=(24, 24),
+        window_size=12,
+        attention_type='linear',
+        prompt_channel=1,
+        pad_len=256,
+    ) -> None:
+        """
+        Cost Aggregation Model for CAT-Seg
+        Args:
+            text_guidance_dim: Dimension of text guidance
+            text_guidance_proj_dim: Dimension of projected text guidance
+            appearance_guidance_dim: Dimension of appearance guidance
+            appearance_guidance_proj_dim: Dimension of projected appearance guidance
+            decoder_dims: Upsampling decoder dimensions
+            decoder_guidance_dims: Upsampling decoder guidance dimensions
+            decoder_guidance_proj_dims: Upsampling decoder guidance projected dimensions
+            num_layers: Number of layers for the aggregator
+            nheads: Number of attention heads
+            hidden_dim: Hidden dimension for transformer blocks
+            pooling_size: Pooling size for the class aggregation layer
+                          To reduce computation, we apply pooling in class aggregation blocks to reduce the number of tokens during training
+            feature_resolution: Feature resolution for spatial aggregation
+            window_size: Window size for Swin block in spatial aggregation
+            attention_type: Attention type for the class aggregation. 
+            prompt_channel: Number of prompts for ensembling text features. Default: 1
+            pad_len: Padding length for the class aggregation. Default: 256
+                     pad_len enforces the class aggregation block to have a fixed length of tokens for all inputs
+                     This means it either pads the sequence with learnable tokens in class aggregation,
+                     or truncates the classes with the initial CLIP cosine-similarity scores.
+                     Set pad_len to 0 to disable this feature.
+            """
+        super().__init__()
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        used_clip_layer = 12
+        # we dropped the appearance_guidance_dim
+        # we make it a must
+        self.layers = nn.ModuleList([
+            AggregatorLayer(
+                hidden_dim=hidden_dim, text_guidance_dim=text_guidance_proj_dim, appearance_guidance=appearance_guidance_proj_dim, 
+                nheads=nheads, input_resolution=feature_resolution, pooling_size=pooling_size, window_size=window_size, attention_type=attention_type, pad_len=pad_len,
+            ) for _ in range(num_layers)
+        ])
+        self.clip_dense_proj_layers = ClipDenseProjLayer(
+            hidden_dim=768, last_dim=512, appearance_guidance_proj_dim = appearance_guidance_proj_dim
+            )if appearance_guidance_dim > 0 else None
+        
+        self.conv1 = nn.Conv2d(prompt_channel, hidden_dim, kernel_size=7, stride=1, padding=3)
+
+        # self.guidance_projection = nn.Sequential(
+        #     nn.Conv2d(appearance_guidance_dim, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
+        #     nn.ReLU(),
+        # ) if appearance_guidance_dim > 0 else None
+
+
+        self.text_guidance_projection = nn.Sequential(
+            nn.LayerNorm(text_guidance_dim),
+            nn.Linear(text_guidance_dim, text_guidance_proj_dim),
+            nn.ReLU(),
+            nn.LayerNorm(text_guidance_proj_dim),
+            nn.Linear(text_guidance_proj_dim, text_guidance_proj_dim//2),
+            nn.ReLU(),
+            nn.LayerNorm(text_guidance_proj_dim//2),
+            nn.Linear(text_guidance_proj_dim//2, text_guidance_proj_dim),
+            nn.ReLU(),
+        ) 
+        self.decoder_guidance_projection = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(d, dp, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+            ) for d, dp in zip(decoder_guidance_dims, decoder_guidance_proj_dims)
+        ]) if decoder_guidance_dims[0] > 0 else None
+
+        self.decoder1 = Up(hidden_dim, decoder_dims[0], decoder_guidance_proj_dims[0])
+        self.decoder2 = Up(decoder_dims[0], decoder_dims[1], decoder_guidance_proj_dims[1])
+        # self.decoder3 = UPmy(decoder_dims[1], decoder_dims[2], 0)
+        # self.decoder4 = UPmy(decoder_dims[2], decoder_dims[3], 0)
+        self.head = nn.Conv2d(decoder_dims[1], 1, kernel_size=3, stride=1, padding=1)
+        # self.head = nn.Conv2d(decoder_dims[3], 1, kernel_size=3, stride=1, padding=1)
+        self.upsample1 = nn.ConvTranspose2d(768, 256, kernel_size=2, stride=2)
+        self.upsample2 = nn.ConvTranspose2d(768, 128, kernel_size=4, stride=4)
+        self.pad_len = pad_len
     
+    def feature_map(self, img_feats, text_feats):
+        # concatenated feature volume for feature aggregation baselines
+        img_feats = F.normalize(img_feats, dim=1) # B C H W
+        img_feats = repeat(img_feats, "B C H W -> B C T H W", T=text_feats.shape[1])
+        text_feats = F.normalize(text_feats, dim=-1) # B T P C
+        text_feats = text_feats.mean(dim=-2) # average text features over different prompts
+        text_feats = F.normalize(text_feats, dim=-1) # B T C
+        text_feats = repeat(text_feats, "B T C -> B C T H W", H=img_feats.shape[-2], W=img_feats.shape[-1])
+        return torch.cat((img_feats, text_feats), dim=1) # B 2C T H W
+
+    def correlation(self, img_feats, text_feats):
+        img_feats = F.normalize(img_feats, dim=1) # B C H W
+        text_feats = F.normalize(text_feats, dim=-1) # B T P C
+        corr = torch.einsum('bchw, btpc -> bpthw', img_feats, text_feats)
+        return corr
+
+    def corr_embed(self, x):
+        B = x.shape[0]
+        corr_embed = rearrange(x, 'B P T H W -> (B T) P H W')
+        corr_embed = self.conv1(corr_embed)
+        corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W', B=B)
+        return corr_embed
+    
+    def corr_projection(self, x, proj):
+        corr_embed = rearrange(x, 'B C T H W -> B T H W C')
+        corr_embed = proj(corr_embed)
+        corr_embed = rearrange(corr_embed, 'B T H W C -> B C T H W')
+        return corr_embed
+
+    def upsample(self, x):
+        B = x.shape[0]
+        corr_embed = rearrange(x, 'B C T H W -> (B T) C H W')
+        corr_embed = F.interpolate(corr_embed, scale_factor=2, mode='bilinear', align_corners=True)
+        corr_embed = rearrange(corr_embed, '(B T) C H W -> B C T H W', B=B)
+        return corr_embed
+
+    def conv_decoder(self, x, guidance):
+        B = x.shape[0]
+        corr_embed = rearrange(x, 'B C T H W -> (B T) C H W')
+        corr_embed = self.decoder1(corr_embed, guidance[0])
+        corr_embed = self.decoder2(corr_embed, guidance[1])
+        corr_embed = self.head(corr_embed)
+        corr_embed = rearrange(corr_embed, '(B T) () H W -> B T H W', B=B)
+        return corr_embed
+    
+    def forward(self, img_feats, text_feats, appearance_guidance):
+        """
+        Arguments:
+            img_feats: (B, C, H, W)
+            text_feats: (B, T, P, C) T是类别的个数
+            apperance_guidance: tuple of (B, C, H, W)
+        """
+
+
+        corr = self.correlation(img_feats, text_feats)
+
+        #corr = self.feature_map(img_feats, text_feats)
+        corr_embed = self.corr_embed(corr)
+
+        projected_guidance, projected_text_guidance, projected_decoder_guidance = None, None, [None, None]
+        if self.clip_dense_proj_layers is not None:
+            #print('encod_guid')
+            projected_guidance = self.clip_dense_proj_layers(appearance_guidance)
+            projected_guidance = sum(projected_guidance)
+            projected_guidance = rearrange(projected_guidance,'B (H W) C -> B C H W',H=img_feats.shape[-2])
+
+        clip_L4 = rearrange(appearance_guidance[3], "B (H W) C -> B C H W", H=24)
+        clip_L8 = rearrange(appearance_guidance[7], "B (H W) C -> B C H W", H=24)
+        res4 = self.upsample1(clip_L4)
+        res5 = self.upsample2(clip_L8)
+        
+        if self.decoder_guidance_projection is not None:
+            #print('decod_guid')
+            projected_decoder_guidance = [proj(g) for proj, g in zip(self.decoder_guidance_projection, [res4,res5])]
+
+        if self.text_guidance_projection is not None:
+            #print('textGuid')
+            text_feats = text_feats.mean(dim=-2)
+            text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
+            projected_text_guidance = self.text_guidance_projection(text_feats)
+
+        for layer in self.layers:
+            # print('enc')
+            corr_embed = layer(corr_embed, projected_guidance, projected_text_guidance)
+
+        logit = self.conv_decoder(corr_embed, projected_decoder_guidance)
+        # print('success here')
+ 
+        return logit
 class FusionAggregatorVer14da(nn.Module):
     def __init__(self, 
         text_guidance_dim=512,
