@@ -5,7 +5,7 @@ from detectron2.data.datasets import load_sem_seg
 import copy
 # change unlabled to background
 
-CLASSES_ISPRS = ['impervious surface', 'building', 'low vegetation', 'tree','car','clutter']
+CLASSES_ISPRS = ['unlabeled','impervious surface', 'building', 'low vegetation', 'tree','car','clutter']
 def _get_landdiscover50k_meta():
     classes = CLASSES_ISPRS
     ret = {
@@ -20,12 +20,12 @@ def register_ade20k_150(root):
     #     ("test", "images/validation", "annotations_detectron2/validation"),
     # ]:
     for name,image_dirname, sem_seg_dirname in [
-         ("potsdam_all", "image", "mask-id"),
+         ("potsdam_all", "img_dir/val", "ann_dir/val"),
      ]:
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)
         name = name
-        DatasetCatalog.register(name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext='png', image_ext='tif'))
+        DatasetCatalog.register(name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext='png', image_ext='png'))
         MetadataCatalog.get(name).set(image_root=image_dir, seg_seg_root=gt_dir, evaluator_type="sem_seg", ignore_label=5, **meta,)
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")

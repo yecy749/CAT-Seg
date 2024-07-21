@@ -290,11 +290,12 @@ class VisualTransformer(nn.Module):
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        
+
         if dense and (x.shape[1] != self.positional_embedding.shape[0]):
             x = x + self.resized_pos_embed(self.input_resolution, x.shape[1]).to(x.dtype)
         else:
             x = x + self.positional_embedding.to(x.dtype)
+            
 
         x = self.ln_pre(x)
 
@@ -366,6 +367,7 @@ class CLIP(nn.Module):
             )
         else:
             vision_heads = vision_width // 64
+
             self.visual = VisualTransformer(
                 input_resolution=image_resolution,
                 patch_size=vision_patch_size,
@@ -484,6 +486,7 @@ def build_model(state_dict: dict, prompt_depth=0, prompt_length=0):
         vision_width = state_dict["visual.conv1.weight"].shape[0]
         vision_layers = len([k for k in state_dict.keys() if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")])
         vision_patch_size = state_dict["visual.conv1.weight"].shape[-1]
+
         grid_size = round((state_dict["visual.positional_embedding"].shape[0] - 1) ** 0.5)
         image_resolution = vision_patch_size * grid_size
     else:

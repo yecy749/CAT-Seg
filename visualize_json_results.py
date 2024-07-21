@@ -88,8 +88,11 @@ if __name__ == "__main__":
         raise ValueError("Unsupported dataset: {}".format(args.dataset))
 
     os.makedirs(args.output, exist_ok=True)
-
+    count=0
     for dic in tqdm.tqdm(dicts):
+        count = count+1
+        if count>50:
+            break
         img = cv2.imread(dic["file_name"], cv2.IMREAD_COLOR)[:, :, ::-1]
         basename = os.path.basename(dic["file_name"])
         # print(img)

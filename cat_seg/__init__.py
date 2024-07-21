@@ -45,6 +45,22 @@ from .implicit_fusion_Ver14b import ImplicitFusionCATSegVer14b
 from .implicit_fusion_Ver14c import ImplicitFusionCATSegVer14c
 from .implicit_fusion_Ver14d import ImplicitFusionCATSegVer14d
 from .implicit_fusion_Ver14e import ImplicitFusionCATSegVer14e
+from .implicit_fusion_Ver20 import ImplicitFusionCATSegVer20
+from .implicit_fusion_Ver20a import ImplicitFusionCATSegVer20a
+from .implicit_fusion_Ver21 import ImplicitFusionCATSegVer21
+from .implicit_fusion_Ver22 import ImplicitFusionCATSegVer22
+from .implicit_fusion_Ver22a import ImplicitFusionCATSegVer22a
+from .implicit_fusion_Ver23 import ImplicitFusionCATSegVer23
+from .implicit_fusion_Ver24 import ImplicitFusionCATSegVer24
+from .implicit_fusion_Ver24a import ImplicitFusionCATSegVer24a
+from .implicit_fusion_Ver25 import ImplicitFusionCATSegVer25
+from .implicit_fusion_Ver26 import ImplicitFusionCATSegVer26
+from .implicit_fusion_Ver27 import ImplicitFusionCATSegVer27
+from .implicit_fusion_Ver28 import ImplicitFusionCATSegVer28
+from .implicit_fusion_Ver29 import ImplicitFusionCATSegVer29
+from .implicit_fusion_Ver30 import ImplicitFusionCATSegVer30
+from .implicit_fusion_Ver31 import ImplicitFusionCATSegVer31
+
 from .vision_transformer import vit_base
 
 
